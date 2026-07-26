@@ -191,11 +191,21 @@
   }
   .face.front .content {
     font-family: var(--font-serif); font-size: 21px; line-height: 1.45; text-wrap: balance;
+    align-items: safe center;
   }
   .face.back .content {
     font-family: var(--font-body); font-size: 15px; line-height: 1.55; white-space: pre-wrap;
     align-items: flex-start; text-align: left;
   }
+  .frac {
+    display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center;
+    font-size: 0.85em; line-height: 1.2; margin: 0 2px; white-space: nowrap;
+  }
+  .frac .num { border-bottom: 1px solid currentColor; padding: 0 3px 1px; }
+  .frac .den { padding: 1px 3px 0; }
+  .fracpow { display: inline-flex; align-items: flex-start; }
+  .fracpow-body { display: inline-flex; align-items: center; }
+  .fracpow sup { font-size: 0.7em; margin-left: 1px; }
   .face .hint { font-size: 12px; color: var(--ink-faint); text-align: center; margin-top: 10px; flex: none; }
 
   .controls { display: flex; gap: 10px; }
@@ -836,6 +846,36 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
 
   let sessionResults = []; // parallel to order
 
+  // Card text may contain _{...} / ^{...} markup for sub/superscripts (e.g. actuarial notation like p_{x}, v^{n-t})
+  // and \frac{num}{den} markup for stacked fractions.
+  function escapeHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  function formatCardText(s) {
+    // \frac{num}{den}^{exp}: whole-fraction exponent, e.g. ((1+a)/(1+b+c))^{n-t}. Must run before the
+    // generic sup/sub passes claim the trailing ^{...}, and before the plain \frac rule below.
+    // The num/den groups allow one level of nested _{...}/^{...} (e.g. \frac{E_{x}}{d_{x}}^{2}) so a
+    // fraction can have both internal subscripts and a whole-fraction exponent; the nested tokens are
+    // left as raw _{...}/^{...} in the captured text and get converted by the generic passes below,
+    // which operate on the whole string regardless of what HTML already surrounds them.
+    // sup/sub then run before the plain \frac rule so \frac{}{} groups nested around them
+    // (e.g. \frac{E_{x}}{d_{x}}) are brace-free by the time that regex runs.
+    const term = "(?:[^{}]|_\\{[^}]*\\}|\\^\\{[^}]*\\})*";
+    const fracPowRe = new RegExp("\\\\frac\\{(" + term + ")\\}\\{(" + term + ")\\}\\^\\{([^}]*)\\}", "g");
+    return escapeHtml(s)
+      .replace(fracPowRe,
+        '<span class="fracpow"><span class="fracpow-body">(<span class="frac"><span class="num">$1</span><span class="den">$2</span></span>)</span><sup>$3</sup></span>')
+      .replace(/\^\{([^}]*)\}/g, "<sup>$1</sup>")
+      .replace(/_\{([^}]*)\}/g, "<sub>$1</sub>")
+      .replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '<span class="frac"><span class="num">$1</span><span class="den">$2</span></span>');
+  }
+  // .content is a flex container (for centering); wrap the formatted markup in one element so it's a
+  // single flex item and its inner <sub>/<sup>/<span> tags flow as normal inline text instead of each
+  // becoming a separate flex item laid out in a row.
+  function formatCardHtml(s) {
+    return "<span>" + formatCardText(s) + "</span>";
+  }
+
   function renderCard() {
     const card = order[pos];
     flipped = false;
@@ -844,8 +884,8 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
       (card.chapter ? card.chapter : "");
     document.getElementById("frontEyebrow").innerHTML = '<span class="chip">' + card.section + '</span>' + card.reading;
     document.getElementById("backEyebrow").innerHTML = eyebrow;
-    document.getElementById("frontContent").textContent = card.q;
-    document.getElementById("backContent").textContent = card.a;
+    document.getElementById("frontContent").innerHTML = formatCardHtml(card.q);
+    document.getElementById("backContent").innerHTML = formatCardHtml(card.a);
     document.getElementById("missedBtn").disabled = true;
     document.getElementById("gotBtn").disabled = true;
     updateProgress();
