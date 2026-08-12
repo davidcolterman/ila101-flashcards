@@ -360,6 +360,13 @@
     cursor: pointer; color: var(--ink-muted); font-family: var(--font-body); font-weight: 500;
   }
   .mode-toggle button.active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .session-size { width: 100%; display: flex; flex-direction: column; gap: 6px; }
+  .session-size-label {
+    display: flex; justify-content: space-between; font-size: 12.5px; color: var(--ink-muted);
+  }
+  .session-size-label b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .session-size input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
+  .session-size input[type="range"]:disabled { cursor: default; opacity: 0.5; }
   .why-card {
     font-size: 12.5px; color: var(--ink-muted); background: var(--accent-soft);
     border-radius: var(--radius-md); padding: 4px 12px 4px 10px; border-left: 3px solid var(--accent);
@@ -500,6 +507,13 @@
       <div class="mode-toggle" id="modeToggle">
         <button type="button" data-mode="all" class="active">All selected</button>
         <button type="button" data-mode="smart">Smart Shuffle</button>
+      </div>
+      <div class="session-size" id="sessionSizeRow">
+        <div class="session-size-label">
+          <span>Session size</span>
+          <span><b id="sessionSizeLabel">0</b> of <span id="sessionSizeMax">0</span></span>
+        </div>
+        <input type="range" id="sessionSizeSlider" min="1" max="1" value="1" step="1">
       </div>
       <button class="secondary-btn" id="resumeBtn" type="button" style="display:none;">Resume session (<span id="resumeCount">0</span> left)</button>
       <button class="primary-btn" id="startBtn" type="button">Shuffle &amp; start</button>
@@ -1333,6 +1347,11 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   // incorrectly after a pause+switch-mode+resume, or leak stale data into a
   // non-Smart-Shuffle session.
   let sessionMode = null;
+  // Session-size slider: defaults to "all selected" and tracks the filtered
+  // count as filters change, UNTIL the user drags it below the max — then it
+  // sticks to their chosen number (clamped down if filters shrink below it).
+  let sessionSize = 0;
+  let sessionSizeTouched = false;
 
   // Smart Shuffle draws from the same filtered pool as "All selected" — it
   // reorders/selects via weighted-random priority rather than restricting to a
@@ -1358,6 +1377,14 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
       " selected in the filter panel";
     document.getElementById("startBtn").disabled = total === 0;
     document.getElementById("startBtn").style.opacity = total === 0 ? 0.5 : 1;
+    if (!sessionSizeTouched || sessionSize > total) sessionSize = total;
+    const slider = document.getElementById("sessionSizeSlider");
+    slider.max = Math.max(total, 1);
+    slider.value = sessionSize;
+    slider.disabled = total === 0;
+    document.getElementById("sessionSizeLabel").textContent = sessionSize;
+    document.getElementById("sessionSizeMax").textContent = total;
+    document.getElementById("sessionSizeRow").style.display = total === 0 ? "none" : "";
     const remaining = order.length - pos;
     const resumeBtn = document.getElementById("resumeBtn");
     if (sessionActive && remaining > 0) {
@@ -1369,6 +1396,12 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     renderWeakSpots();
     renderHeatmap();
   }
+
+  document.getElementById("sessionSizeSlider").addEventListener("input", e => {
+    sessionSize = parseInt(e.target.value, 10);
+    sessionSizeTouched = true;
+    document.getElementById("sessionSizeLabel").textContent = sessionSize;
+  });
 
   document.getElementById("modeToggle").addEventListener("click", e => {
     const btn = e.target.closest("button[data-mode]");
@@ -1385,9 +1418,13 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     document.body.classList.toggle("reviewing", name === "review");
   }
 
-  function startSession(cards) {
+  // size caps how many cards the session draws from `cards` — omit it (or pass
+  // cards.length) to use every card passed in, e.g. when reshuffling an
+  // already-capped subset or a missed-cards list that shouldn't be capped again.
+  function startSession(cards, size) {
     sessionMode = mode;
-    order = sessionMode === "smart" ? selectSmartShuffleCards(cards, cards.length) : shuffle(cards);
+    const n = Math.min(size == null ? cards.length : size, cards.length);
+    order = sessionMode === "smart" ? selectSmartShuffleCards(cards, n) : shuffle(cards).slice(0, n);
     pos = 0;
     sessionGot = 0; sessionMissed = 0;
     flipped = false;
@@ -1410,15 +1447,16 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     renderCard();
   }
 
-  document.getElementById("startBtn").addEventListener("click", () => startSession(filteredDeck()));
+  document.getElementById("startBtn").addEventListener("click", () => startSession(filteredDeck(), sessionSize));
   document.getElementById("resumeBtn").addEventListener("click", resumeSession);
   document.getElementById("backBtn").addEventListener("click", pauseSession);
-  document.getElementById("reshuffleBtn").addEventListener("click", () => startSession(order.length ? order : filteredDeck()));
+  document.getElementById("reshuffleBtn").addEventListener("click", () =>
+    order.length ? startSession(order) : startSession(filteredDeck(), sessionSize));
   document.getElementById("endSessionBtn").addEventListener("click", () => finishSession());
-  document.getElementById("reshuffleAllBtn").addEventListener("click", () => startSession(filteredDeck()));
+  document.getElementById("reshuffleAllBtn").addEventListener("click", () => startSession(filteredDeck(), sessionSize));
   document.getElementById("reviewMissedBtn").addEventListener("click", () => {
     const missed = order.filter((c, i) => sessionResults[i] === "missed");
-    startSession(missed.length ? missed : filteredDeck());
+    missed.length ? startSession(missed) : startSession(filteredDeck(), sessionSize);
   });
   document.getElementById("backToSetupBtn").addEventListener("click", () => {
     refreshSetupScreen();
