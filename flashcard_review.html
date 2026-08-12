@@ -127,9 +127,17 @@
      hide it and let the card take the full width. The back arrow in
      .review-top-row is the only way back, and it pauses rather than ends the
      session (see pauseSession()/resumeSession() in the script). */
-  body.reviewing { grid-template-columns: 1fr; }
+  /* Locks the page itself in place during review — no body scroll/bounce, only the
+     card's own internal content (.face .content, if a card's text overflows) scrolls.
+     The card and controls are sized below to actually fill that fixed viewport rather
+     than floating in the middle of it with unused space above/below. */
+  body.reviewing { grid-template-columns: 1fr; overflow: hidden; height: 100vh; }
   body.reviewing #sidebar { display: none; }
   body.reviewing #sidebarToggle { display: none; }
+  body.reviewing .stage { height: 100%; }
+  body.reviewing #main { height: 100%; padding: 16px 20px 20px; }
+  body.reviewing .card-scene { flex: 1; min-height: 0; }
+  body.reviewing .card { height: 100%; min-height: 0; max-height: none; }
 
   h1, h2, h3 { font-family: var(--font-serif); font-weight: 600; text-wrap: balance; margin: 0; }
 
@@ -154,7 +162,7 @@
   #treeSearch::placeholder { color: var(--ink-faint); }
   #treeSearch:focus { outline: none; border-color: var(--accent); }
   #treeSearchEmpty { font-size: 12.5px; color: var(--ink-faint); padding: 8px 4px; }
-  #tree { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; font-size: 13px; }
+  #tree { font-size: 13px; }
   #tree details { margin-bottom: 2px; }
   #tree details[open] > summary { color: var(--ink); }
   #tree details details { margin-left: 14px; }
@@ -1709,7 +1717,12 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
           got: (r ? r.got : 0) + delta.got,
           missed: (r ? r.missed : 0) + delta.missed,
           lastResult: newer.lastResult, last: newer.last,
-          streak: newer.streak, lastCorrectAt: newer.lastCorrectAt
+          // Records from before the streak feature (2026-08-11) predate these two
+          // fields entirely. Firestore's SDK throws — synchronously, before any
+          // network write, so the whole sync silently "fails offline" — if you try
+          // to write a field as literally `undefined`, so default rather than pass
+          // newer.streak/lastCorrectAt straight through.
+          streak: newer.streak || 0, lastCorrectAt: newer.lastCorrectAt || 0
         };
       });
       tx.set(syncDocRef, { stats: merged, updatedAt: Date.now() }, { merge: true });
