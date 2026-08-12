@@ -350,7 +350,6 @@
   <div class="sidebar-footer">
     <div class="stat-line"><span>Study streak</span><span class="n" id="statStreak">0 days</span></div>
     <div class="stat-line"><span>Cards reviewed (all time)</span><span class="n" id="statSeen">0</span></div>
-    <div class="stat-line"><span>In inbox now</span><span class="n" id="statInbox">0</span></div>
     <div class="quick-actions" style="margin-top:8px;">
       <button id="exportBtn" type="button">Export progress</button>
       <button id="importBtn" type="button">Import progress</button>
@@ -379,7 +378,6 @@
       <p id="setupSub">cards selected in the filter panel</p>
       <div class="mode-toggle" id="modeToggle">
         <button type="button" data-mode="all" class="active">All selected</button>
-        <button type="button" data-mode="inbox">Inbox (due now)</button>
         <button type="button" data-mode="smart">Smart Shuffle</button>
       </div>
       <button class="secondary-btn" id="resumeBtn" type="button" style="display:none;">Resume session (<span id="resumeCount">0</span> left)</button>
@@ -918,16 +916,10 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   document.getElementById("selectNoneBtn").addEventListener("click", () => setLeaves(DECK.map(c => c.leaf), false));
 
   // ---------- footer stats ----------
-  function inboxCards(cards) {
-    const now = Date.now();
-    return cards.filter(c => stats[c.id] && stats[c.id].dueAt > 0 && stats[c.id].dueAt <= now);
-  }
-
   function refreshFooterStats() {
     let seen = 0;
     Object.values(stats).forEach(s => { seen += s.seen; });
     document.getElementById("statSeen").textContent = seen;
-    document.getElementById("statInbox").textContent = inboxCards(DECK).length;
     document.getElementById("statStreak").textContent =
       dailyStreak.count + (dailyStreak.count === 1 ? " day" : " days");
     refreshAccuracyUI();
@@ -1021,7 +1013,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   });
 
   // ---------- session state ----------
-  let mode = "all"; // 'all' | 'inbox' | 'smart'
+  let mode = "all"; // 'all' | 'smart'
   let order = [];
   let pos = 0;
   let flipped = false;
@@ -1044,15 +1036,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   // reorders/selects via weighted-random priority rather than restricting to a
   // smaller subset, so it needs no separate filteredDeck() branch.
   function filteredDeck() {
-    let d = DECK.filter(c => selectedLeaves.has(c.leaf));
-    if (mode === "inbox") {
-      d = inboxCards(d);
-    }
-    return d;
-  }
-
-  function inboxCountInSelection() {
-    return inboxCards(DECK.filter(c => selectedLeaves.has(c.leaf))).length;
+    return DECK.filter(c => selectedLeaves.has(c.leaf));
   }
 
   function shuffle(arr) {
@@ -1068,14 +1052,10 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     const total = filteredDeck().length;
     document.getElementById("setupCount").textContent = total;
     document.getElementById("setupSub").textContent =
-      (mode === "inbox" ? "due cards" : mode === "smart" ? "cards, smart-prioritized" : "cards") +
+      (mode === "smart" ? "cards, smart-prioritized" : "cards") +
       " selected in the filter panel";
     document.getElementById("startBtn").disabled = total === 0;
     document.getElementById("startBtn").style.opacity = total === 0 ? 0.5 : 1;
-    const inboxTabBtn = document.querySelector('.mode-toggle button[data-mode="inbox"]');
-    const inboxAvail = inboxCountInSelection();
-    inboxTabBtn.disabled = inboxAvail === 0;
-    inboxTabBtn.textContent = "Inbox due now (" + inboxAvail + ")";
     const remaining = order.length - pos;
     const resumeBtn = document.getElementById("resumeBtn");
     if (sessionActive && remaining > 0) {
@@ -1220,7 +1200,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   // Populates the collapsible "why this card?" panel from the snapshot Smart
   // Shuffle recorded when it picked this session's cards (see smartShuffleInfo
   // in selectSmartShuffleCards()). Only shown in Smart Shuffle mode, since
-  // "all"/"inbox" mode don't compute these signals for the session.
+  // "all" mode doesn't compute these signals for the session.
   function renderWhyCard(card) {
     const whyEl = document.getElementById("whyCard");
     const info = sessionMode === "smart" ? smartShuffleInfo[card.id] : null;
