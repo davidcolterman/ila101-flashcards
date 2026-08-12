@@ -82,13 +82,22 @@
     grid-template-columns: 330px 1fr;
     min-height: 100vh;
   }
+  /* #sidebar is a pure positioning/animation shell — it never scrolls and never
+     carries its own overflow. #sidebarScroll (its one child) is the only scrollable
+     region. This split exists because iOS Safari has a well-known issue where a
+     scrollable element that ALSO carries a `transform` (even the drawer's resting
+     `translateX(0)`, which is still a transform, not the literal keyword `none`)
+     can fail to respond to touch-scroll at all — keeping the transform on the outer
+     shell and the scrolling on an untransformed inner child sidesteps it entirely. */
   #sidebar {
     border-right: 1px solid var(--border);
     background: var(--surface);
-    padding: 20px 16px 16px;
+    position: sticky; top: 0; height: 100vh;
+  }
+  #sidebarScroll {
+    height: 100%; padding: 20px 16px 16px;
     display: flex; flex-direction: column; gap: 16px;
-    position: sticky; top: 0; height: 100vh; overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
   }
   #sidebarToggle { display: none; }
   #sidebarBackdrop { display: none; }
@@ -108,14 +117,16 @@
     }
     #sidebar {
       position: fixed; top: 0; left: 0; z-index: 30; width: min(320px, 86vw);
-      max-height: none; border-right: 1px solid var(--border); box-shadow: var(--shadow);
+      border-right: 1px solid var(--border); box-shadow: var(--shadow); overflow: hidden;
       transform: translateX(-100%); transition: transform 0.25s ease;
+    }
+    #sidebar.open { transform: translateX(0); }
+    #sidebarScroll {
       /* Room for #sidebarToggle, which sits fixed at top:14px/left:14px (44px tall)
          over this same corner — without this the "ILA-101 Flashcards" title renders
          right underneath the close button. */
       padding-top: 68px;
     }
-    #sidebar.open { transform: translateX(0); }
     #sidebarBackdrop {
       display: block; position: fixed; inset: 0; z-index: 25; background: rgba(15, 10, 12, 0.4);
       opacity: 0; pointer-events: none; transition: opacity 0.25s ease;
@@ -131,13 +142,20 @@
      card's own internal content (.face .content, if a card's text overflows) scrolls.
      The card and controls are sized below to actually fill that fixed viewport rather
      than floating in the middle of it with unused space above/below. */
-  body.reviewing { grid-template-columns: 1fr; overflow: hidden; height: 100vh; }
+  /* height:100vh is taller than the actually-visible area on iOS Safari whenever its
+     collapsing toolbar is showing — 100dvh (dynamic viewport height) tracks the real
+     visible area instead. Declared as a fallback pair: browsers that don't support
+     dvh simply fail to parse the second declaration and keep the vh one. This matters
+     here specifically because overflow:hidden below means there's no scroll left as
+     a safety net if 100vh overshoots — content sized past the true visible area would
+     just be unreachable rather than merely requiring a scroll. */
+  body.reviewing {
+    grid-template-columns: 1fr; overflow: hidden;
+    height: 100vh; height: 100dvh;
+  }
   body.reviewing #sidebar { display: none; }
   body.reviewing #sidebarToggle { display: none; }
-  body.reviewing .stage { height: 100%; }
-  body.reviewing #main { height: 100%; padding: 16px 20px 20px; }
-  body.reviewing .card-scene { flex: 1; min-height: 0; }
-  body.reviewing .card { height: 100%; min-height: 0; max-height: none; }
+  body.reviewing #main { padding: 16px 20px 20px; }
 
   h1, h2, h3 { font-family: var(--font-serif); font-weight: 600; text-wrap: balance; margin: 0; }
 
@@ -241,7 +259,10 @@
 
   .card-scene { perspective: 1600px; }
   .card {
-    position: relative; min-height: 320px; max-height: min(70vh, 620px); border-radius: var(--radius-lg);
+    position: relative; min-height: 320px;
+    max-height: min(76vh, 660px);
+    max-height: min(76dvh, 660px);
+    border-radius: var(--radius-lg);
     transform-style: preserve-3d; transition: transform 0.45s cubic-bezier(.4,.2,.2,1);
     cursor: pointer;
   }
@@ -428,42 +449,44 @@
 <button class="icon-btn" id="sidebarToggle" type="button" aria-label="Open filters">☰</button>
 <div id="sidebarBackdrop"></div>
 <div id="sidebar">
-  <div class="brand">
-    <h1>ILA-101 Flashcards</h1>
-    <div class="sub" id="deckMeta">loading…</div>
-  </div>
-  <div class="quick-actions">
-    <button id="selectAllBtn" type="button">Select all</button>
-    <button id="selectNoneBtn" type="button">Select none</button>
-  </div>
-  <input type="text" id="treeSearch" placeholder="Search cards…" aria-label="Search cards">
-  <div id="tree" role="tree" aria-label="Filter by section, reading, and chapter"></div>
-  <div id="treeSearchEmpty" style="display:none;">No matching cards</div>
-  <div class="sidebar-footer">
-    <div class="stat-line"><span>Study streak</span><span class="n" id="statStreak">0 days</span></div>
-    <div class="stat-line"><span>Cards reviewed (all time)</span><span class="n" id="statSeen">0</span></div>
-    <div class="spark-row" id="sparkRow" style="display:none;">
-      <span>30-day accuracy</span>
-      <span class="n" id="sparkDelta"></span>
+  <div id="sidebarScroll">
+    <div class="brand">
+      <h1>ILA-101 Flashcards</h1>
+      <div class="sub" id="deckMeta">loading…</div>
     </div>
-    <svg id="sparkSvg" width="100%" height="26" viewBox="0 0 240 26" preserveAspectRatio="none" style="display:none;"></svg>
-    <div class="quick-actions" style="margin-top:8px;">
-      <button id="exportBtn" type="button">Export progress</button>
-      <button id="importBtn" type="button">Import progress</button>
+    <div class="quick-actions">
+      <button id="selectAllBtn" type="button">Select all</button>
+      <button id="selectNoneBtn" type="button">Select none</button>
     </div>
-    <input type="file" id="importFile" accept="application/json" style="display:none;">
-    <div id="importStatus" style="font-size:11.5px; min-height: 14px; margin-top: 4px;"></div>
-    <div class="quick-actions" style="margin-top:8px;">
-      <button id="syncBtn" type="button">Enable cloud sync</button>
-    </div>
-    <div id="syncForm" style="display:none; gap:6px; margin-top:6px;">
-      <input type="text" id="syncCodeInput" placeholder="Private sync code" style="width:100%; box-sizing:border-box; padding:6px 8px; border-radius:var(--radius-sm); border:1px solid var(--border); background:var(--surface); color:var(--ink); font-size:12.5px;">
-      <div class="quick-actions" style="margin-top:6px;">
-        <button id="syncConnectBtn" type="button">Connect</button>
+    <input type="text" id="treeSearch" placeholder="Search cards…" aria-label="Search cards">
+    <div id="tree" role="tree" aria-label="Filter by section, reading, and chapter"></div>
+    <div id="treeSearchEmpty" style="display:none;">No matching cards</div>
+    <div class="sidebar-footer">
+      <div class="stat-line"><span>Study streak</span><span class="n" id="statStreak">0 days</span></div>
+      <div class="stat-line"><span>Cards reviewed (all time)</span><span class="n" id="statSeen">0</span></div>
+      <div class="spark-row" id="sparkRow" style="display:none;">
+        <span>30-day accuracy</span>
+        <span class="n" id="sparkDelta"></span>
       </div>
+      <svg id="sparkSvg" width="100%" height="26" viewBox="0 0 240 26" preserveAspectRatio="none" style="display:none;"></svg>
+      <div class="quick-actions" style="margin-top:8px;">
+        <button id="exportBtn" type="button">Export progress</button>
+        <button id="importBtn" type="button">Import progress</button>
+      </div>
+      <input type="file" id="importFile" accept="application/json" style="display:none;">
+      <div id="importStatus" style="font-size:11.5px; min-height: 14px; margin-top: 4px;"></div>
+      <div class="quick-actions" style="margin-top:8px;">
+        <button id="syncBtn" type="button">Enable cloud sync</button>
+      </div>
+      <div id="syncForm" style="display:none; gap:6px; margin-top:6px;">
+        <input type="text" id="syncCodeInput" placeholder="Private sync code" style="width:100%; box-sizing:border-box; padding:6px 8px; border-radius:var(--radius-sm); border:1px solid var(--border); background:var(--surface); color:var(--ink); font-size:12.5px;">
+        <div class="quick-actions" style="margin-top:6px;">
+          <button id="syncConnectBtn" type="button">Connect</button>
+        </div>
+      </div>
+      <div id="syncStatus" style="font-size:11.5px; min-height: 14px; margin-top: 4px;"></div>
+      <button id="resetProgressBtn" type="button">Reset all progress</button>
     </div>
-    <div id="syncStatus" style="font-size:11.5px; min-height: 14px; margin-top: 4px;"></div>
-    <button id="resetProgressBtn" type="button">Reset all progress</button>
   </div>
 </div>
 
