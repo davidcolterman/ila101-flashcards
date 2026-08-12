@@ -1207,7 +1207,12 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     if (!subsectionIndex.has(c.reading)) subsectionIndex.set(c.reading, { section: c.section, cards: [] });
     subsectionIndex.get(c.reading).cards.push(c);
   });
-  const MIN_ATTEMPTS_FOR_WEAKEST = 5; // avoid ranking a subsection "weakest" off one or two lucky/unlucky answers
+  // Shared floor for both weak-spot lists: avoids ranking a subsection "weakest" off
+  // one or two lucky/unlucky answers, and keeps "least-tested" meaning "started but
+  // needs more reps" rather than "not started at all" (an untouched section has
+  // avgSeen=0, the lowest possible, so without this floor it would always win that
+  // list — which isn't a useful callout, since you already know you haven't opened it).
+  const MIN_ATTEMPTS_FOR_DASHBOARD = 5;
 
   function subsectionSummaries() {
     return Array.from(subsectionIndex.entries()).map(([reading, info]) => {
@@ -1274,9 +1279,9 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
 
   function renderWeakSpots() {
     const summaries = subsectionSummaries();
-    const weakest = summaries.filter(s => s.attempts >= MIN_ATTEMPTS_FOR_WEAKEST)
+    const weakest = summaries.filter(s => s.attempts >= MIN_ATTEMPTS_FOR_DASHBOARD)
       .sort((a, b) => a.accuracy - b.accuracy).slice(0, 5);
-    const leastTested = summaries.slice()
+    const leastTested = summaries.filter(s => s.attempts >= MIN_ATTEMPTS_FOR_DASHBOARD)
       .sort((a, b) => a.avgSeen - b.avgSeen || b.cardCount - a.cardCount)
       .slice(0, 5);
 
