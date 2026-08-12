@@ -19,6 +19,8 @@
     --accent: #d6487e;
     --accent-ink: #ffffff;
     --accent-soft: #fce0eb;
+    --heat-2: #f2a8c4;
+    --heat-3: #e56f9c;
     --success: #3f7d52;
     --success-soft: #e3f1e6;
     --danger: #ad4530;
@@ -38,11 +40,13 @@
       --surface-2: #202a2c;
       --ink: #e9ece8;
       --ink-muted: #9caaa4;
-      --ink-faint: #667470;
+      --ink-faint: #849089;
       --border: #2b3838;
       --accent: #ef7fa8;
       --accent-ink: #0d1f1a;
       --accent-soft: #3a1f2a;
+      --heat-2: #6e3650;
+      --heat-3: #b85578;
       --success: #7bc794;
       --success-soft: #1c3223;
       --danger: #e28a6c;
@@ -52,8 +56,9 @@
   }
   :root[data-theme="dark"] {
     --bg: #12181a; --surface: #1a2325; --surface-2: #202a2c; --ink: #e9ece8;
-    --ink-muted: #9caaa4; --ink-faint: #667470; --border: #2b3838;
+    --ink-muted: #9caaa4; --ink-faint: #849089; --border: #2b3838;
     --accent: #ef7fa8; --accent-ink: #0d1f1a; --accent-soft: #3a1f2a;
+    --heat-2: #6e3650; --heat-3: #b85578;
     --success: #7bc794; --success-soft: #1c3223; --danger: #e28a6c; --danger-soft: #3a251d;
     --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px -12px rgba(0,0,0,0.5);
   }
@@ -61,6 +66,7 @@
     --bg: #fdf0f4; --surface: #ffffff; --surface-2: #fbe4ec; --ink: #1a201d;
     --ink-muted: #6b585f; --ink-faint: #a4919a; --border: #f3d3de;
     --accent: #d6487e; --accent-ink: #ffffff; --accent-soft: #fce0eb;
+    --heat-2: #f2a8c4; --heat-3: #e56f9c;
     --success: #3f7d52; --success-soft: #e3f1e6; --danger: #ad4530; --danger-soft: #f7e5df;
     --shadow: 0 1px 2px rgba(20,30,25,0.06), 0 8px 24px -12px rgba(20,30,25,0.18);
   }
@@ -76,9 +82,39 @@
     grid-template-columns: 330px 1fr;
     min-height: 100vh;
   }
+  #sidebar {
+    border-right: 1px solid var(--border);
+    padding: 20px 16px 16px;
+    display: flex; flex-direction: column; gap: 16px;
+    position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  }
+  #sidebarToggle { display: none; }
+  #sidebarBackdrop { display: none; }
+  /* This media query must stay AFTER the base #sidebar rule above: both target
+     #sidebar with equal specificity, so source order decides which wins for the
+     properties they share (position/top) — if the base rule came second, it would
+     silently override position:fixed back to sticky even while this query is active,
+     leaving the "drawer" in normal document flow instead of taken out as an overlay. */
+  /* Below 860px the sidebar would otherwise sit in normal document flow above the
+     setup screen — on a phone that means scrolling past the whole filter tree just
+     to reach the Start button every single visit. Instead it becomes a slide-out
+     drawer, closed by default, so the setup screen (and Start) is visible immediately. */
   @media (max-width: 860px) {
     body { grid-template-columns: 1fr; }
-    #sidebar { position: static; max-height: none; border-right: none; border-bottom: 1px solid var(--border); }
+    #sidebarToggle {
+      display: flex; position: fixed; top: 14px; left: 14px; z-index: 40;
+    }
+    #sidebar {
+      position: fixed; top: 0; left: 0; z-index: 30; width: min(320px, 86vw);
+      max-height: none; border-right: 1px solid var(--border); box-shadow: var(--shadow);
+      transform: translateX(-100%); transition: transform 0.25s ease;
+    }
+    #sidebar.open { transform: translateX(0); }
+    #sidebarBackdrop {
+      display: block; position: fixed; inset: 0; z-index: 25; background: rgba(15, 10, 12, 0.4);
+      opacity: 0; pointer-events: none; transition: opacity 0.25s ease;
+    }
+    #sidebarBackdrop.open { opacity: 1; pointer-events: auto; }
   }
   /* During a review session the section-filter sidebar is irrelevant (and, for
      Smart Shuffle, would hint at the section of a card meant to test recall) —
@@ -87,16 +123,11 @@
      session (see pauseSession()/resumeSession() in the script). */
   body.reviewing { grid-template-columns: 1fr; }
   body.reviewing #sidebar { display: none; }
+  body.reviewing #sidebarToggle { display: none; }
 
   h1, h2, h3 { font-family: var(--font-serif); font-weight: 600; text-wrap: balance; margin: 0; }
 
   /* ---------- Sidebar ---------- */
-  #sidebar {
-    border-right: 1px solid var(--border);
-    padding: 20px 16px 16px;
-    display: flex; flex-direction: column; gap: 16px;
-    position: sticky; top: 0; height: 100vh; overflow-y: auto;
-  }
   .brand { display: flex; flex-direction: column; gap: 2px; }
   .brand h1 { font-size: 18px; letter-spacing: -0.01em; }
   .brand .sub { font-size: 12px; color: var(--ink-muted); }
@@ -109,13 +140,22 @@
   }
   .quick-actions button:hover { color: var(--ink); border-color: var(--ink-faint); }
 
+  #treeSearch {
+    width: 100%; box-sizing: border-box; padding: 7px 10px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border); background: var(--surface); color: var(--ink);
+    font-size: 12.5px; font-family: var(--font-body);
+  }
+  #treeSearch::placeholder { color: var(--ink-faint); }
+  #treeSearch:focus { outline: none; border-color: var(--accent); }
+  #treeSearchEmpty { font-size: 12.5px; color: var(--ink-faint); padding: 8px 4px; }
   #tree { flex: 1; overflow-y: auto; font-size: 13px; }
   #tree details { margin-bottom: 2px; }
   #tree details[open] > summary { color: var(--ink); }
   #tree details details { margin-left: 14px; }
   #tree summary {
     list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px;
-    padding: 5px 4px; border-radius: var(--radius-sm); color: var(--ink-muted);
+    padding: 9px 4px; border-radius: var(--radius-sm); color: var(--ink-muted);
+    transition: background 0.6s ease;
   }
   #tree summary::-webkit-details-marker { display: none; }
   #tree summary:hover { background: var(--surface-2); }
@@ -125,11 +165,14 @@
   }
   #tree details[open] > summary .tri { transform: rotate(90deg); }
   #tree .leaf-row {
-    display: flex; align-items: center; gap: 6px; padding: 5px 4px 5px 22px;
+    display: flex; align-items: center; gap: 6px; padding: 9px 4px 9px 22px;
     border-radius: var(--radius-sm); font-size: 12.5px; color: var(--ink-muted);
+    transition: background 0.6s ease;
   }
   #tree details details .leaf-row { padding-left: 30px; }
   #tree .leaf-row:hover { background: var(--surface-2); }
+  #tree details.just-revealed > summary,
+  #tree .leaf-row.just-revealed { background: var(--accent-soft); }
   #tree label { display: flex; align-items: center; gap: 6px; flex: 1; cursor: pointer; min-width: 0; }
   #tree .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #tree .count {
@@ -140,19 +183,22 @@
     font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 10.5px;
     color: var(--ink-faint); flex: none; padding-left: 6px; min-width: 28px; text-align: right;
   }
-  #tree input[type="checkbox"] { accent-color: var(--accent); flex: none; }
+  #tree input[type="checkbox"] { accent-color: var(--accent); flex: none; width: 16px; height: 16px; }
   #tree .section-summary .name { font-weight: 600; color: var(--ink); font-size: 13.5px; }
   #tree .reading-summary .name { font-weight: 500; }
 
   .sidebar-footer { border-top: 1px solid var(--border); padding-top: 12px; font-size: 12px; color: var(--ink-muted); }
   .stat-line { display: flex; justify-content: space-between; padding: 2px 0; }
   .stat-line .n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ink); }
+  .spark-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0 2px; }
+  .spark-row .n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 11px; }
+  .spark-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .spark-dot { fill: var(--accent); stroke: var(--surface-2); stroke-width: 2; }
   #resetProgressBtn {
     margin-top: 8px; width: 100%; font-size: 11.5px; padding: 6px; border-radius: var(--radius-sm);
     border: 1px solid var(--border); background: transparent; color: var(--ink-faint); cursor: pointer;
   }
   #resetProgressBtn:hover { border-color: var(--danger); color: var(--danger); }
-  #resetProgressBtn.confirm { border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
 
   /* ---------- Main ---------- */
   #main { padding: 32px 24px 48px; display: flex; flex-direction: column; align-items: center; }
@@ -160,7 +206,7 @@
 
   .review-top-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .icon-btn {
-    width: 36px; height: 36px; border-radius: 999px; flex: none;
+    width: 44px; height: 44px; border-radius: 999px; flex: none;
     border: 1px solid var(--border); background: var(--surface); color: var(--ink);
     font-size: 17px; line-height: 1; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
@@ -259,7 +305,7 @@
   .util-row { display: flex; justify-content: space-between; align-items: center; }
   .link-btn {
     background: none; border: none; color: var(--ink-muted); font-size: 12.5px; cursor: pointer;
-    font-family: var(--font-body); padding: 4px; text-decoration: underline; text-underline-offset: 2px;
+    font-family: var(--font-body); padding: 11px 6px; margin: -11px -6px; text-decoration: underline; text-underline-offset: 2px;
   }
   .link-btn:hover { color: var(--ink); }
 
@@ -278,12 +324,11 @@
     cursor: pointer; color: var(--ink-muted); font-family: var(--font-body); font-weight: 500;
   }
   .mode-toggle button.active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-  .mode-toggle button:disabled { opacity: 0.4; cursor: not-allowed; }
   .why-card {
-    font-size: 12.5px; color: var(--ink-muted); background: var(--surface-2);
-    border-radius: var(--radius-md); padding: 4px 12px;
+    font-size: 12.5px; color: var(--ink-muted); background: var(--accent-soft);
+    border-radius: var(--radius-md); padding: 4px 12px 4px 10px; border-left: 3px solid var(--accent);
   }
-  .why-card summary { cursor: pointer; padding: 6px 0; font-weight: 500; color: var(--ink); }
+  .why-card summary { cursor: pointer; padding: 6px 0; font-weight: 600; color: var(--accent); }
   .why-body {
     white-space: pre-wrap; font-family: var(--font-mono); font-size: 11.5px;
     line-height: 1.6; padding: 2px 0 10px;
@@ -294,6 +339,14 @@
     font-family: var(--font-body);
   }
   .primary-btn:hover { opacity: 0.92; }
+  /* #startBtn only, not every .primary-btn (the summary screen reuses the class
+     alongside secondary buttons in a row, where 100% width would break the layout) —
+     this is THE action that matters on nearly every visit to the setup screen, so it
+     gets outsized visual weight the weak-spots/heatmap sections below it don't. */
+  #startBtn {
+    width: 100%; padding: 16px 26px; font-size: 16px; font-weight: 700;
+    box-shadow: 0 10px 24px -10px var(--accent); margin-top: 4px;
+  }
   .secondary-btn {
     background: none; border: 1px solid var(--border); color: var(--ink); padding: 12px 22px;
     border-radius: var(--radius-md); font-size: 14px; font-weight: 500; cursor: pointer; font-family: var(--font-body);
@@ -306,6 +359,27 @@
   .summary-grid .stat.got .num { color: var(--success); }
   .summary-grid .stat.missed .num { color: var(--danger); }
   .screen-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+
+  .activity-heatmap {
+    width: 100%; text-align: left; margin-top: 4px; padding-top: 18px; border-top: 1px solid var(--border);
+    position: relative;
+  }
+  .activity-heatmap h3 {
+    font-family: var(--font-body); font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--ink-faint); margin: 0 0 10px;
+  }
+  .heat-grid {
+    display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 1fr); grid-auto-columns: 1fr;
+    gap: 3px; width: 100%; height: 88px;
+  }
+  .heat-cell { border-radius: 3px; background: var(--surface-2); }
+  .heat-legend { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--ink-faint); margin-top: 8px; }
+  .heat-legend .heat-cell { width: 10px; height: 10px; flex: none; }
+  .heat-tooltip {
+    position: absolute; pointer-events: none; background: var(--ink); color: var(--bg);
+    font-family: var(--font-body); font-size: 11.5px; padding: 6px 9px; border-radius: var(--radius-sm);
+    opacity: 0; transition: opacity 0.1s; white-space: pre-line; line-height: 1.5; z-index: 5;
+  }
 
   .weak-spots {
     display: grid; grid-template-columns: 1fr 1fr; gap: 20px; width: 100%; text-align: left;
@@ -337,6 +411,8 @@
   ::selection { background: var(--accent-soft); }
 </style>
 
+<button class="icon-btn" id="sidebarToggle" type="button" aria-label="Open filters">☰</button>
+<div id="sidebarBackdrop"></div>
 <div id="sidebar">
   <div class="brand">
     <h1>ILA-101 Flashcards</h1>
@@ -346,10 +422,17 @@
     <button id="selectAllBtn" type="button">Select all</button>
     <button id="selectNoneBtn" type="button">Select none</button>
   </div>
+  <input type="text" id="treeSearch" placeholder="Search cards…" aria-label="Search cards">
   <div id="tree" role="tree" aria-label="Filter by section, reading, and chapter"></div>
+  <div id="treeSearchEmpty" style="display:none;">No matching cards</div>
   <div class="sidebar-footer">
     <div class="stat-line"><span>Study streak</span><span class="n" id="statStreak">0 days</span></div>
     <div class="stat-line"><span>Cards reviewed (all time)</span><span class="n" id="statSeen">0</span></div>
+    <div class="spark-row" id="sparkRow" style="display:none;">
+      <span>30-day accuracy</span>
+      <span class="n" id="sparkDelta"></span>
+    </div>
+    <svg id="sparkSvg" width="100%" height="26" viewBox="0 0 240 26" preserveAspectRatio="none" style="display:none;"></svg>
     <div class="quick-actions" style="margin-top:8px;">
       <button id="exportBtn" type="button">Export progress</button>
       <button id="importBtn" type="button">Import progress</button>
@@ -382,6 +465,20 @@
       </div>
       <button class="secondary-btn" id="resumeBtn" type="button" style="display:none;">Resume session (<span id="resumeCount">0</span> left)</button>
       <button class="primary-btn" id="startBtn" type="button">Shuffle &amp; start</button>
+      <div class="activity-heatmap">
+        <h3>Study activity — last 12 weeks</h3>
+        <div id="heatmapGrid" class="heat-grid"></div>
+        <div class="heat-legend">
+          <span>Less</span>
+          <span class="heat-cell" style="background:var(--surface-2)"></span>
+          <span class="heat-cell" style="background:var(--accent-soft)"></span>
+          <span class="heat-cell" style="background:var(--heat-2)"></span>
+          <span class="heat-cell" style="background:var(--heat-3)"></span>
+          <span class="heat-cell" style="background:var(--accent)"></span>
+          <span>More</span>
+        </div>
+        <div class="heat-tooltip" id="heatTooltip"></div>
+      </div>
       <div class="weak-spots">
         <div class="weak-spots-col">
           <h3>5 Weakest Sections</h3>
@@ -489,7 +586,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) return JSON.parse(raw);
     } catch (e) {}
-    return { stats: {}, selected: null, dailyStreak: null };
+    return { stats: {}, selected: null, dailyStreak: null, syncBaseline: {}, dailyLog: {} };
   }
   // If a saved leaf selection shares no overlap with the deck's current leaves
   // (e.g. section/reading/chapter labels were retagged), treat it as stale
@@ -513,12 +610,23 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   // sync — see schedulePush(), which only pushes `stats`), since "opened the
   // app today" is inherently a per-device fact.
   let dailyStreak = persisted.dailyStreak || { count: 0, lastActiveDate: null };
+  // Per-card {seen,got,missed} snapshot as of this device's last successful sync
+  // merge — see mergeSync(). Lets a push contribute only what changed locally
+  // since then (a delta), rather than overwriting the server's cumulative counts.
+  let syncBaseline = persisted.syncBaseline || {};
+  // Per-day {seen, got} activity log, keyed by local calendar date (YYYY-MM-DD) —
+  // local-only like dailyStreak/selected, drives the sidebar sparkline and the
+  // setup-screen activity heatmap. Unbounded growth is fine: ~1 entry/day, a few
+  // exam-prep months is a trivial amount of JSON.
+  let dailyLog = persisted.dailyLog || {};
 
   function persist() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       stats,
       selected: Array.from(selectedLeaves),
-      dailyStreak
+      dailyStreak,
+      syncBaseline,
+      dailyLog
     }));
     schedulePush();
   }
@@ -555,7 +663,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   }
 
   function cardStat(id) {
-    if (!stats[id]) stats[id] = { seen: 0, got: 0, missed: 0, lastResult: null, last: null, dueAt: 0, streak: 0, lastCorrectAt: 0 };
+    if (!stats[id]) stats[id] = { seen: 0, got: 0, missed: 0, lastResult: null, last: null, streak: 0, lastCorrectAt: 0 };
     return migrateStreakFields(stats[id]);
   }
 
@@ -568,18 +676,6 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   function statFor(id) {
     const s = stats[id];
     return s ? migrateStreakFields(s) : null;
-  }
-
-  // ---------- spaced-repetition schedule ----------
-  const MIN = 60 * 1000, HOUR = 60 * MIN;
-  // delay until next inbox appearance, keyed by [previous result][new result]
-  const SCHEDULE = {
-    none:   { got: 24 * HOUR, missed: 1 * HOUR },
-    got:    { got: 72 * HOUR, missed: 24 * HOUR },
-    missed: { got: 24 * HOUR, missed: 30 * MIN }
-  };
-  function nextDueDelay(prevResult, newResult) {
-    return (SCHEDULE[prevResult || "none"] || SCHEDULE.none)[newResult];
   }
 
   // ---------- Smart Shuffle ----------
@@ -765,12 +861,17 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   }
 
   const checkboxRegistry = []; // {el, keys} keys = array of leaf strings this checkbox governs
-  const pctRegistry = []; // {el, cards} cards = array of card objects this % display covers
+  const pctRegistry = []; // {el, cards, container} cards = array of card objects this node covers; container = the row/details element to hide/show for search
+  // section+"|"+reading -> {sectionDetails, readingDetails, row} so weak-spot clicks can
+  // open+scroll to the matching tree node instead of leaving the user to dig for it manually.
+  // readingDetails is null for a standalone reading with no chapter sub-level (see `row` instead).
+  const readingElements = new Map();
 
   function buildTreeUI() {
     const container = document.getElementById("tree");
     container.innerHTML = "";
     pctRegistry.length = 0;
+    readingElements.clear();
     const sections = Array.from(tree.keys()).sort((a, b) => {
       const ia = SECTION_ORDER.indexOf(a), ib = SECTION_ORDER.indexOf(b);
       return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
@@ -807,7 +908,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
       summary.appendChild(tri); summary.appendChild(label);
       details.appendChild(summary);
       checkboxRegistry.push({ el: cb, keys: secLeaves });
-      pctRegistry.push({ el: pctSpan, cards: secCards });
+      pctRegistry.push({ el: pctSpan, cards: secCards, container: details });
 
       readings.forEach((chapters, reading) => {
         const readingLeaves = leafKeysFor(section, reading);
@@ -832,7 +933,8 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
           row.appendChild(rLabel);
           details.appendChild(row);
           checkboxRegistry.push({ el: rCb, keys: readingLeaves });
-          pctRegistry.push({ el: rPct, cards: readingCards });
+          pctRegistry.push({ el: rPct, cards: readingCards, container: row });
+          readingElements.set(section + "|" + reading, { sectionDetails: details, readingDetails: null, row });
         } else {
           const rDetails = document.createElement("details");
           const rSummary = document.createElement("summary");
@@ -852,7 +954,8 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
           rSummary.appendChild(rTri); rSummary.appendChild(rLabel);
           rDetails.appendChild(rSummary);
           checkboxRegistry.push({ el: rCb, keys: readingLeaves });
-          pctRegistry.push({ el: rPct, cards: readingCards });
+          pctRegistry.push({ el: rPct, cards: readingCards, container: rDetails });
+          readingElements.set(section + "|" + reading, { sectionDetails: details, readingDetails: rDetails, row: null });
 
           chapters.forEach((cards, chLabel) => {
             const chLeaves = cards.map(c => c.leaf);
@@ -871,7 +974,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
             row.appendChild(cLabel);
             rDetails.appendChild(row);
             checkboxRegistry.push({ el: cCb, keys: chLeaves });
-            pctRegistry.push({ el: cPct, cards: cards });
+            pctRegistry.push({ el: cPct, cards: cards, container: row });
           });
 
           details.appendChild(rDetails);
@@ -897,6 +1000,29 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     });
   }
 
+  // Filters the tree to nodes whose cards' question/answer text matches the query —
+  // navigational only, doesn't touch selectedLeaves. Every pctRegistry entry already
+  // carries the card set covering its container (section/reading/chapter), so a
+  // section or reading is kept visible+expanded whenever any card beneath it matches,
+  // since its own `cards` array is the union of its descendants'.
+  function applyTreeSearch(query) {
+    const q = query.trim().toLowerCase();
+    const active = q.length >= 2;
+    let anyVisible = false;
+    pctRegistry.forEach(({ cards, container }) => {
+      if (!active) { container.style.display = ""; return; }
+      const match = cards.some(c => c.q.toLowerCase().includes(q) || c.a.toLowerCase().includes(q));
+      container.style.display = match ? "" : "none";
+      if (match) {
+        anyVisible = true;
+        if (container.tagName === "DETAILS") container.open = true;
+      }
+    });
+    document.getElementById("treeSearchEmpty").style.display = (active && !anyVisible) ? "" : "none";
+  }
+
+  document.getElementById("treeSearch").addEventListener("input", e => applyTreeSearch(e.target.value));
+
   function setLeaves(keys, checked) {
     keys.forEach(k => checked ? selectedLeaves.add(k) : selectedLeaves.delete(k));
     persist();
@@ -915,6 +1041,21 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   document.getElementById("selectAllBtn").addEventListener("click", () => setLeaves(DECK.map(c => c.leaf), true));
   document.getElementById("selectNoneBtn").addEventListener("click", () => setLeaves(DECK.map(c => c.leaf), false));
 
+  // ---------- mobile sidebar drawer (below 860px, see CSS) ----------
+  (function () {
+    const sidebar = document.getElementById("sidebar");
+    const toggle = document.getElementById("sidebarToggle");
+    const backdrop = document.getElementById("sidebarBackdrop");
+    function setOpen(open) {
+      sidebar.classList.toggle("open", open);
+      backdrop.classList.toggle("open", open);
+      toggle.textContent = open ? "✕" : "☰";
+      toggle.setAttribute("aria-label", open ? "Close filters" : "Open filters");
+    }
+    toggle.addEventListener("click", () => setOpen(!sidebar.classList.contains("open")));
+    backdrop.addEventListener("click", () => setOpen(false));
+  })();
+
   // ---------- footer stats ----------
   function refreshFooterStats() {
     let seen = 0;
@@ -923,6 +1064,109 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     document.getElementById("statStreak").textContent =
       dailyStreak.count + (dailyStreak.count === 1 ? " day" : " days");
     refreshAccuracyUI();
+    renderSparkline();
+  }
+
+  // ---------- daily activity log (sparkline + heatmap) ----------
+  function dailyLogSeries(numDays) {
+    const days = [];
+    const now = new Date();
+    for (let i = numDays - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      const key = localDateStr(d);
+      const entry = dailyLog[key];
+      days.push({ date: key, seen: entry ? entry.seen : 0, got: entry ? entry.got : 0 });
+    }
+    return days;
+  }
+
+  // Trailing-window accuracy (sum got / sum seen over the last `window` days ending
+  // at each day), not raw per-day accuracy — otherwise single-card days and gap days
+  // make the line jump around meaninglessly instead of showing a real trend.
+  function rollingAccuracy(days, window) {
+    return days.map((_, i) => {
+      let seen = 0, got = 0;
+      for (let j = Math.max(0, i - window + 1); j <= i; j++) { seen += days[j].seen; got += days[j].got; }
+      return seen > 0 ? got / seen : null;
+    });
+  }
+
+  const svgNS = "http://www.w3.org/2000/svg";
+  function svgEl(tag, attrs) {
+    const el = document.createElementNS(svgNS, tag);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  }
+
+  function renderSparkline() {
+    const days = dailyLogSeries(30);
+    const acc = rollingAccuracy(days, 7);
+    const points = acc.map((v, i) => v === null ? null : [i, v]).filter(Boolean);
+    const row = document.getElementById("sparkRow");
+    const svg = document.getElementById("sparkSvg");
+    if (points.length < 2) { row.style.display = "none"; svg.style.display = "none"; return; }
+    row.style.display = ""; svg.style.display = "";
+
+    const w = 240, h = 26, pad = 3;
+    const vals = points.map(p => p[1]);
+    const min = Math.min(...vals), max = Math.max(...vals), span = (max - min) || 1;
+    const first = points[0][0], last = points[points.length - 1][0], span2 = (last - first) || 1;
+    const xFor = i => pad + ((i - first) / span2) * (w - pad * 2);
+    const yFor = v => h - pad - ((v - min) / span) * (h - pad * 2);
+
+    svg.innerHTML = "";
+    const d = "M" + points.map(([i, v]) => xFor(i) + "," + yFor(v)).join(" L");
+    svg.appendChild(svgEl("path", { d, class: "spark-line" }));
+    const [li, lv] = points[points.length - 1];
+    svg.appendChild(svgEl("circle", { cx: xFor(li), cy: yFor(lv), r: 3, class: "spark-dot" }));
+
+    const deltaEl = document.getElementById("sparkDelta");
+    const weekAgoIdx = points.findIndex(p => p[0] === li - 7);
+    if (weekAgoIdx === -1) {
+      deltaEl.textContent = "";
+    } else {
+      const delta = Math.round((lv - points[weekAgoIdx][1]) * 100);
+      deltaEl.textContent = (delta >= 0 ? "+" : "") + delta + "% " + (delta >= 0 ? "↑" : "↓");
+      deltaEl.style.color = delta >= 0 ? "var(--success)" : "var(--danger)";
+    }
+  }
+
+  function renderHeatmap() {
+    const days = dailyLogSeries(84); // 12 weeks
+    // Pad the front so columns always start on a Sunday, like GitHub's heatmap,
+    // instead of a ragged first week.
+    const firstDow = new Date(days[0].date + "T00:00:00").getDay();
+    const padded = new Array(firstDow).fill(null).concat(days);
+
+    const grid = document.getElementById("heatmapGrid");
+    const tooltip = document.getElementById("heatTooltip");
+    grid.innerHTML = "";
+    const maxSeen = Math.max(1, ...days.map(d => d.seen));
+    function colorFor(seen) {
+      if (!seen) return "var(--surface-2)";
+      const f = seen / maxSeen;
+      if (f < 0.25) return "var(--accent-soft)";
+      if (f < 0.5) return "var(--heat-2)";
+      if (f < 0.75) return "var(--heat-3)";
+      return "var(--accent)";
+    }
+    padded.forEach(day => {
+      const cell = document.createElement("div");
+      cell.className = "heat-cell";
+      if (!day) { cell.style.visibility = "hidden"; grid.appendChild(cell); return; }
+      cell.style.background = colorFor(day.seen);
+      cell.addEventListener("pointermove", e => {
+        const label = new Date(day.date + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
+        tooltip.textContent = label + "\n" + day.seen + " card" + (day.seen === 1 ? "" : "s") + " reviewed" +
+          (day.seen > 0 ? " · " + Math.round((day.got / day.seen) * 100) + "% accuracy" : "");
+        const wrapRect = grid.parentElement.getBoundingClientRect();
+        tooltip.style.left = Math.min(wrapRect.width - 140, e.clientX - wrapRect.left + 10) + "px";
+        tooltip.style.top = Math.max(0, e.clientY - wrapRect.top - 40) + "px";
+        tooltip.style.opacity = 1;
+      });
+      cell.addEventListener("pointerleave", () => { tooltip.style.opacity = 0; });
+      grid.appendChild(cell);
+    });
   }
 
   // ---------- weak-spot summaries (subsection granularity, e.g. "A.1 Life Insurance Products") ----------
@@ -950,6 +1194,25 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     });
   }
 
+  // Opens the section/reading tree nodes for a weak-spot entry and scrolls to it, so the
+  // per-chapter accuracy % already shown in the tree (#tree .pct) is immediately visible
+  // instead of requiring the user to manually re-expand and hunt for it.
+  function revealReadingInTree(section, reading) {
+    const entry = readingElements.get(section + "|" + reading);
+    if (!entry) return;
+    // An active search filter can leave this node's container display:none, in which
+    // case opening/scrolling to it below would silently do nothing visible — clear it
+    // first so the reveal the user just asked for actually shows up.
+    const searchInput = document.getElementById("treeSearch");
+    if (searchInput.value) { searchInput.value = ""; applyTreeSearch(""); }
+    entry.sectionDetails.open = true;
+    if (entry.readingDetails) entry.readingDetails.open = true;
+    const target = entry.readingDetails || entry.row;
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
+    target.classList.add("just-revealed");
+    setTimeout(() => target.classList.remove("just-revealed"), 1500);
+  }
+
   function renderWeakSpotList(el, items, metricFn) {
     el.innerHTML = "";
     if (items.length === 0) {
@@ -962,7 +1225,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     items.forEach(s => {
       const li = document.createElement("li");
       li.className = "weak-spot-item";
-      li.title = "Click to select just this section";
+      li.title = "Click to select just this section and reveal it in the filter tree";
       const name = document.createElement("span");
       name.className = "weak-spot-name"; name.textContent = s.reading;
       const metric = document.createElement("span");
@@ -971,6 +1234,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
       li.addEventListener("click", () => {
         setLeaves(DECK.map(c => c.leaf), false);
         setLeaves(s.leaves, true);
+        revealReadingInTree(s.section, s.reading);
       });
       el.appendChild(li);
     });
@@ -990,25 +1254,24 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
       s => s.avgSeen.toFixed(1) + "x avg");
   }
 
-  let resetArmed = false;
-  const resetBtn = document.getElementById("resetProgressBtn");
-  resetBtn.addEventListener("click", () => {
-    if (!resetArmed) {
-      resetArmed = true;
-      resetBtn.textContent = "Click again to confirm";
-      resetBtn.classList.add("confirm");
-      setTimeout(() => {
-        resetArmed = false;
-        resetBtn.textContent = "Reset all progress";
-        resetBtn.classList.remove("confirm");
-      }, 3000);
-    } else {
-      Object.keys(stats).forEach(k => delete stats[k]);
-      persist();
-      refreshFooterStats();
-      resetArmed = false;
-      resetBtn.textContent = "Reset all progress";
-      resetBtn.classList.remove("confirm");
+  // A real confirm() rather than a self-reverting "click again" label: the old
+  // pattern had no countdown shown and was one accidental double-tap away from
+  // silently wiping all 605 cards' history, especially on mobile.
+  document.getElementById("resetProgressBtn").addEventListener("click", () => {
+    if (!confirm("Reset all progress? This erases every card's seen/got/missed history and the study-activity log on this device (and in cloud sync, if enabled). This can't be undone.")) return;
+    Object.keys(stats).forEach(k => delete stats[k]);
+    syncBaseline = {};
+    dailyLog = {};
+    persist();
+    refreshFooterStats();
+    refreshSetupScreen();
+    // A regular sync push merges deltas against whatever's still on the server,
+    // which would just pull the "erased" progress right back in — a reset needs
+    // an explicit full overwrite of the remote copy instead. Cancel persist()'s
+    // debounced push first so it can't race this overwrite and land after it.
+    if (syncReady && syncDocRef) {
+      clearTimeout(syncPushTimer);
+      syncDocRef.set({ stats: {}, updatedAt: Date.now() }).catch(() => {});
     }
   });
 
@@ -1065,6 +1328,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
       resumeBtn.style.display = "none";
     }
     renderWeakSpots();
+    renderHeatmap();
   }
 
   document.getElementById("modeToggle").addEventListener("click", e => {
@@ -1242,10 +1506,8 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   function mark(result) {
     const card = order[pos];
     const s = cardStat(card.id);
-    const prevResult = s.lastResult;
     s.seen++;
     s[result]++;
-    s.dueAt = Date.now() + nextDueDelay(prevResult, result);
     s.lastResult = result;
     s.last = Date.now();
     // Consecutive-streak tracking for calculateConfidence(): a signed counter,
@@ -1259,6 +1521,10 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     }
     sessionResults[pos] = result;
     if (result === "got") sessionGot++; else sessionMissed++;
+    const today = localDateStr();
+    if (!dailyLog[today]) dailyLog[today] = { seen: 0, got: 0 };
+    dailyLog[today].seen++;
+    if (result === "got") dailyLog[today].got++;
     persist();
     refreshFooterStats();
 
@@ -1299,7 +1565,8 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
       exportedAt: new Date().toISOString(),
       stats,
       selected: Array.from(selectedLeaves),
-      dailyStreak
+      dailyStreak,
+      dailyLog
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -1339,12 +1606,24 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
         if (!data || typeof data.stats !== "object") throw new Error("Not a recognized progress file");
         Object.keys(stats).forEach(k => delete stats[k]);
         Object.assign(stats, data.stats);
+        // Baseline = the freshly-imported stats exactly, not left stale or cleared to
+        // {}: either of those would make the next sync treat imported counts as new
+        // unsynced progress and ADD them to whatever's already on the server, double-
+        // counting anything that was already reflected there. Import means "this is now
+        // the truth," same as Reset, so the explicit remote overwrite below makes that
+        // true on the server too instead of leaving it to a delta-merge to reconcile.
+        syncBaseline = JSON.parse(JSON.stringify(stats));
         selectedLeaves = new Set(sanitizeSelected(data.selected) || DECK.map(c => c.leaf));
         if (data.dailyStreak) dailyStreak = data.dailyStreak;
+        if (data.dailyLog) dailyLog = data.dailyLog;
         persist();
         refreshTreeUI();
         refreshFooterStats();
         refreshSetupScreen();
+        if (syncReady && syncDocRef) {
+          clearTimeout(syncPushTimer);
+          syncDocRef.set({ stats, updatedAt: Date.now() }).catch(() => {});
+        }
         showImportStatus("Imported progress for " + Object.keys(data.stats).length + " cards.", false);
       } catch (e) {
         showImportStatus("Couldn't read that file: " + e.message, true);
@@ -1385,10 +1664,72 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     if (!syncReady || !syncDocRef) return;
     clearTimeout(syncPushTimer);
     syncPushTimer = setTimeout(() => {
-      syncDocRef.set({ stats, updatedAt: Date.now() }, { merge: true })
-        .then(() => setSyncStatus("Synced " + new Date().toLocaleTimeString()))
-        .catch(() => setSyncStatus("Cloud sync offline (will retry)", true));
+      mergeSync().catch(() => setSyncStatus("Cloud sync offline (will retry)", true));
     }, 2000);
+  }
+
+  // Writes to localStorage without going through persist() (which would recurse:
+  // persist -> schedulePush -> mergeSync -> ends up back here).
+  function persistLocalOnly() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      stats, selected: Array.from(selectedLeaves), dailyStreak, syncBaseline, dailyLog
+    }));
+  }
+
+  // Merges this device's local stats into the server's, via a transaction so it's
+  // always reconciled against FRESH server state, not a stale load-time snapshot.
+  // Cumulative counters (seen/got/missed) are combined by adding only what changed
+  // locally since this device's last successful sync (syncBaseline), not by
+  // overwriting the server's totals wholesale — otherwise two devices reviewing
+  // the same card between syncs would silently lose one side's counts instead of
+  // both being reflected. Point-in-time fields (lastResult/last/streak/
+  // lastCorrectAt) come from whichever side was touched more recently, which is
+  // the one thing the old logic already got right. Runs both on connect and on
+  // every debounced push after a local review.
+  async function mergeSync() {
+    // Frozen snapshots so a Firestore-transaction retry (on write contention) always
+    // recomputes the same delta against the same starting point, rather than treating
+    // its own prior attempt's output as if it were the original local state.
+    const localSnapshot = JSON.parse(JSON.stringify(stats));
+    const baselineSnapshot = JSON.parse(JSON.stringify(syncBaseline));
+    let merged;
+    await firebase.firestore().runTransaction(async tx => {
+      const snap = await tx.get(syncDocRef);
+      const remote = (snap.exists && snap.data().stats) || {};
+      merged = {};
+      new Set([...Object.keys(remote), ...Object.keys(localSnapshot)]).forEach(id => {
+        const r = remote[id], l = localSnapshot[id], b = baselineSnapshot[id];
+        const delta = (l && b)
+          ? { seen: Math.max(0, l.seen - b.seen), got: Math.max(0, l.got - b.got), missed: Math.max(0, l.missed - b.missed) }
+          : (l ? { seen: l.seen, got: l.got, missed: l.missed } : { seen: 0, got: 0, missed: 0 });
+        const newer = (l && (!r || (l.last || 0) >= (r.last || 0))) ? l : r;
+        merged[id] = {
+          seen: (r ? r.seen : 0) + delta.seen,
+          got: (r ? r.got : 0) + delta.got,
+          missed: (r ? r.missed : 0) + delta.missed,
+          lastResult: newer.lastResult, last: newer.last,
+          streak: newer.streak, lastCorrectAt: newer.lastCorrectAt
+        };
+      });
+      tx.set(syncDocRef, { stats: merged, updatedAt: Date.now() }, { merge: true });
+    });
+    // Only overwrite stats[id] with the merged result if the live value still matches
+    // what was snapshotted going into the transaction. If it doesn't, a mark() landed
+    // on this card while the (network-round-trip-bound) transaction was in flight —
+    // overwriting it here would silently drop that review, since merged[id] was computed
+    // from the stale pre-transaction snapshot and knows nothing about it. Leaving it
+    // alone is safe: syncBaseline still advances to `merged` below, so that concurrent
+    // edit is correctly captured as a delta on the *next* sync instead of being lost.
+    Object.keys(merged).forEach(id => {
+      const stillFresh = JSON.stringify(stats[id] || null) === JSON.stringify(localSnapshot[id] || null);
+      if (stillFresh) stats[id] = merged[id];
+    });
+    syncBaseline = JSON.parse(JSON.stringify(merged));
+    persistLocalOnly();
+    refreshTreeUI();
+    refreshFooterStats();
+    refreshSetupScreen();
+    setSyncStatus("Synced " + new Date().toLocaleTimeString());
   }
 
   async function initSync() {
@@ -1399,21 +1740,9 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
       await firebase.auth().signInAnonymously();
       const docId = await sha256Hex(syncCode);
       syncDocRef = firebase.firestore().collection("syncs").doc(docId);
-      const snap = await syncDocRef.get();
-      if (snap.exists) {
-        const remote = snap.data().stats || {};
-        Object.keys(remote).forEach(id => {
-          const r = remote[id], l = stats[id];
-          if (!l || (r.last || 0) > (l.last || 0)) stats[id] = r;
-        });
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ stats, selected: Array.from(selectedLeaves), dailyStreak }));
-        refreshTreeUI();
-        refreshFooterStats();
-        refreshSetupScreen();
-      }
       syncReady = true;
+      await mergeSync();
       setSyncStatus("Cloud sync on");
-      schedulePush();
     } catch (e) {
       setSyncStatus("Cloud sync offline (will retry)", true);
     }
