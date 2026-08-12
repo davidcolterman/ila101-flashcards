@@ -80,6 +80,13 @@
     body { grid-template-columns: 1fr; }
     #sidebar { position: static; max-height: none; border-right: none; border-bottom: 1px solid var(--border); }
   }
+  /* During a review session the section-filter sidebar is irrelevant (and, for
+     Smart Shuffle, would hint at the section of a card meant to test recall) —
+     hide it and let the card take the full width. The back arrow in
+     .review-top-row is the only way back, and it pauses rather than ends the
+     session (see pauseSession()/resumeSession() in the script). */
+  body.reviewing { grid-template-columns: 1fr; }
+  body.reviewing #sidebar { display: none; }
 
   h1, h2, h3 { font-family: var(--font-serif); font-weight: 600; text-wrap: balance; margin: 0; }
 
@@ -151,6 +158,15 @@
   #main { padding: 32px 24px 48px; display: flex; flex-direction: column; align-items: center; }
   .stage { width: 100%; max-width: 620px; display: flex; flex-direction: column; gap: 18px; }
 
+  .review-top-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .icon-btn {
+    width: 36px; height: 36px; border-radius: 999px; flex: none;
+    border: 1px solid var(--border); background: var(--surface); color: var(--ink);
+    font-size: 17px; line-height: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .icon-btn:hover { border-color: var(--ink-faint); background: var(--surface-2); }
+
   .progress-row { display: flex; align-items: center; gap: 12px; }
   .progress-track {
     flex: 1; height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden;
@@ -177,14 +193,6 @@
     padding: 28px 30px; display: flex; flex-direction: column; overflow: hidden;
   }
   .face.back { transform: rotateY(180deg); }
-  .face .eyebrow {
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-faint);
-    font-family: var(--font-body); font-weight: 600; margin-bottom: 14px; flex: none;
-  }
-  .face .eyebrow .chip {
-    display: inline-block; background: var(--accent-soft); color: var(--accent); padding: 2px 7px;
-    border-radius: 5px; margin-right: 6px; font-weight: 600; letter-spacing: 0.02em;
-  }
   .face .content {
     flex: 1; display: flex; align-items: flex-start; min-height: 0;
     overflow-y: auto; overscroll-behavior: contain;
@@ -340,6 +348,7 @@
   </div>
   <div id="tree" role="tree" aria-label="Filter by section, reading, and chapter"></div>
   <div class="sidebar-footer">
+    <div class="stat-line"><span>Study streak</span><span class="n" id="statStreak">0 days</span></div>
     <div class="stat-line"><span>Cards reviewed (all time)</span><span class="n" id="statSeen">0</span></div>
     <div class="stat-line"><span>In inbox now</span><span class="n" id="statInbox">0</span></div>
     <div class="quick-actions" style="margin-top:8px;">
@@ -373,6 +382,7 @@
         <button type="button" data-mode="inbox">Inbox (due now)</button>
         <button type="button" data-mode="smart">Smart Shuffle</button>
       </div>
+      <button class="secondary-btn" id="resumeBtn" type="button" style="display:none;">Resume session (<span id="resumeCount">0</span> left)</button>
       <button class="primary-btn" id="startBtn" type="button">Shuffle &amp; start</button>
       <div class="weak-spots">
         <div class="weak-spots-col">
@@ -387,26 +397,27 @@
     </div>
 
     <div id="reviewScreen" class="stage" style="display:none;">
-      <div class="progress-row">
-        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
-        <div class="progress-label" id="progressLabel">0 / 0</div>
-      </div>
-      <div class="session-tally">
-        <span class="tally-got">Got it <b id="tallyGot">0</b></span>
-        <span class="tally-missed">Missed <b id="tallyMissed">0</b></span>
+      <div class="review-top-row">
+        <button class="icon-btn" id="backBtn" type="button" aria-label="Back to setup (keeps your place)">←</button>
+        <div class="session-tally">
+          <span class="tally-got">Got it <b id="tallyGot">0</b></span>
+          <span class="tally-missed">Missed <b id="tallyMissed">0</b></span>
+        </div>
       </div>
       <div class="card-scene">
         <div class="card" id="card" tabindex="0" role="button" aria-label="Flashcard, click or press space to flip">
           <div class="face front">
-            <div class="eyebrow" id="frontEyebrow"></div>
             <div class="content" id="frontContent"></div>
             <div class="hint">Click card or press space to flip</div>
           </div>
           <div class="face back">
-            <div class="eyebrow" id="backEyebrow"></div>
             <div class="content" id="backContent"></div>
           </div>
         </div>
+      </div>
+      <div class="progress-row">
+        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+        <div class="progress-label" id="progressLabel">0 / 0</div>
       </div>
       <details class="why-card" id="whyCard" style="display:none;">
         <summary>Why this card?</summary>
@@ -480,7 +491,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) return JSON.parse(raw);
     } catch (e) {}
-    return { stats: {}, selected: null };
+    return { stats: {}, selected: null, dailyStreak: null };
   }
   // If a saved leaf selection shares no overlap with the deck's current leaves
   // (e.g. section/reading/chapter labels were retagged), treat it as stale
@@ -500,13 +511,40 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     // ensure every leaf present (first run, or recovering from stale selection)
     DECK.forEach(c => selectedLeaves.add(c.leaf));
   }
+  // Daily streak: local-only (like `selected`, deliberately not part of cloud
+  // sync — see schedulePush(), which only pushes `stats`), since "opened the
+  // app today" is inherently a per-device fact.
+  let dailyStreak = persisted.dailyStreak || { count: 0, lastActiveDate: null };
 
   function persist() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       stats,
-      selected: Array.from(selectedLeaves)
+      selected: Array.from(selectedLeaves),
+      dailyStreak
     }));
     schedulePush();
+  }
+
+  function localDateStr(d) {
+    d = d || new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  // Called once per page load. Counts consecutive CALENDAR days (local time)
+  // the app has been opened on: same day as last visit -> no change, exactly
+  // one day later -> streak+1, any bigger gap (or first-ever visit) -> reset to 1.
+  function updateDailyStreak() {
+    const today = localDateStr();
+    if (dailyStreak.lastActiveDate === today) return;
+    if (dailyStreak.lastActiveDate) {
+      const last = new Date(dailyStreak.lastActiveDate + "T00:00:00");
+      const diffDays = Math.round((new Date(today + "T00:00:00") - last) / (24 * 60 * 60 * 1000));
+      dailyStreak.count = diffDays === 1 ? dailyStreak.count + 1 : 1;
+    } else {
+      dailyStreak.count = 1;
+    }
+    dailyStreak.lastActiveDate = today;
+    persist();
   }
 
   // Migration for stats saved before streak/lastCorrectAt existed: derive a
@@ -890,6 +928,8 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     Object.values(stats).forEach(s => { seen += s.seen; });
     document.getElementById("statSeen").textContent = seen;
     document.getElementById("statInbox").textContent = inboxCards(DECK).length;
+    document.getElementById("statStreak").textContent =
+      dailyStreak.count + (dailyStreak.count === 1 ? " day" : " days");
     refreshAccuracyUI();
   }
 
@@ -986,6 +1026,19 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   let pos = 0;
   let flipped = false;
   let sessionGot = 0, sessionMissed = 0;
+  // True from startSession() until finishSession() — survives the back arrow
+  // (pauseSession()), which is what makes a paused session resumable rather
+  // than discarded. order/pos/sessionGot/sessionMissed are left untouched by
+  // pausing, so resumeSession() just re-shows the same in-flight session.
+  let sessionActive = false;
+  // The mode `order` was actually built under — NOT the same as the live
+  // `mode` global, which can change while a session is paused (the setup
+  // screen's mode-toggle is still interactive) or across an unrelated later
+  // session that happens to reuse smartShuffleInfo's stale entries. renderWhyCard()
+  // must key off this, not `mode`, or the "why this card?" panel can show/hide
+  // incorrectly after a pause+switch-mode+resume, or leak stale data into a
+  // non-Smart-Shuffle session.
+  let sessionMode = null;
 
   // Smart Shuffle draws from the same filtered pool as "All selected" — it
   // reorders/selects via weighted-random priority rather than restricting to a
@@ -1023,6 +1076,14 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     const inboxAvail = inboxCountInSelection();
     inboxTabBtn.disabled = inboxAvail === 0;
     inboxTabBtn.textContent = "Inbox due now (" + inboxAvail + ")";
+    const remaining = order.length - pos;
+    const resumeBtn = document.getElementById("resumeBtn");
+    if (sessionActive && remaining > 0) {
+      resumeBtn.style.display = "";
+      document.getElementById("resumeCount").textContent = remaining;
+    } else {
+      resumeBtn.style.display = "none";
+    }
     renderWeakSpots();
   }
 
@@ -1038,18 +1099,37 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     document.getElementById("setupScreen").style.display = name === "setup" ? "flex" : "none";
     document.getElementById("reviewScreen").style.display = name === "review" ? "flex" : "none";
     document.getElementById("summaryScreen").style.display = name === "summary" ? "flex" : "none";
+    document.body.classList.toggle("reviewing", name === "review");
   }
 
   function startSession(cards) {
-    order = mode === "smart" ? selectSmartShuffleCards(cards, cards.length) : shuffle(cards);
+    sessionMode = mode;
+    order = sessionMode === "smart" ? selectSmartShuffleCards(cards, cards.length) : shuffle(cards);
     pos = 0;
     sessionGot = 0; sessionMissed = 0;
     flipped = false;
+    sessionActive = true;
+    showScreen("review");
+    renderCard();
+  }
+
+  // Back arrow: leave the review screen WITHOUT ending the session — order/pos/
+  // tallies are left exactly as they are, so resumeSession() picks up on the
+  // same card. Contrast with finishSession() (End session / finishing the
+  // last card), which clears sessionActive because the session is genuinely over.
+  function pauseSession() {
+    showScreen("setup");
+    refreshSetupScreen();
+  }
+
+  function resumeSession() {
     showScreen("review");
     renderCard();
   }
 
   document.getElementById("startBtn").addEventListener("click", () => startSession(filteredDeck()));
+  document.getElementById("resumeBtn").addEventListener("click", resumeSession);
+  document.getElementById("backBtn").addEventListener("click", pauseSession);
   document.getElementById("reshuffleBtn").addEventListener("click", () => startSession(order.length ? order : filteredDeck()));
   document.getElementById("endSessionBtn").addEventListener("click", () => finishSession());
   document.getElementById("reshuffleAllBtn").addEventListener("click", () => startSession(filteredDeck()));
@@ -1117,10 +1197,9 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     const card = order[pos];
     flipped = false;
     document.getElementById("card").classList.remove("flipped");
-    const eyebrow = (card.section ? '<span class="chip">' + card.reading + '</span>' : "") +
-      (card.chapter ? card.chapter : "");
-    document.getElementById("frontEyebrow").innerHTML = '<span class="chip">' + card.section + '</span>' + card.reading;
-    document.getElementById("backEyebrow").innerHTML = eyebrow;
+    // Section/reading is deliberately NOT shown during review (it used to be a
+    // per-face "eyebrow" label) — for Smart Shuffle in particular, seeing which
+    // section a card came from can hint at the answer before you've tried to recall it.
     document.getElementById("frontContent").innerHTML = formatCardHtml(card.q);
     document.getElementById("backContent").innerHTML = card.table ? renderTableHtml(card.table) : formatCardHtml(card.a);
     document.getElementById("missedBtn").disabled = true;
@@ -1144,7 +1223,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   // "all"/"inbox" mode don't compute these signals for the session.
   function renderWhyCard(card) {
     const whyEl = document.getElementById("whyCard");
-    const info = mode === "smart" ? smartShuffleInfo[card.id] : null;
+    const info = sessionMode === "smart" ? smartShuffleInfo[card.id] : null;
     if (!info) { whyEl.style.display = "none"; return; }
     whyEl.style.display = "";
     const s = statFor(card.id);
@@ -1222,6 +1301,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   });
 
   function finishSession() {
+    sessionActive = false; // session is genuinely over now — no longer resumable
     document.getElementById("sumGot").textContent = sessionGot;
     document.getElementById("sumMissed").textContent = sessionMissed;
     document.getElementById("sumTotal").textContent = sessionGot + sessionMissed;
@@ -1238,7 +1318,8 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
       version: 1,
       exportedAt: new Date().toISOString(),
       stats,
-      selected: Array.from(selectedLeaves)
+      selected: Array.from(selectedLeaves),
+      dailyStreak
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -1279,6 +1360,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
         Object.keys(stats).forEach(k => delete stats[k]);
         Object.assign(stats, data.stats);
         selectedLeaves = new Set(sanitizeSelected(data.selected) || DECK.map(c => c.leaf));
+        if (data.dailyStreak) dailyStreak = data.dailyStreak;
         persist();
         refreshTreeUI();
         refreshFooterStats();
@@ -1344,7 +1426,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
           const r = remote[id], l = stats[id];
           if (!l || (r.last || 0) > (l.last || 0)) stats[id] = r;
         });
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ stats, selected: Array.from(selectedLeaves) }));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ stats, selected: Array.from(selectedLeaves), dailyStreak }));
         refreshTreeUI();
         refreshFooterStats();
         refreshSetupScreen();
@@ -1379,6 +1461,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   // ---------- init ----------
   document.getElementById("deckMeta").textContent = DECK.length + " cards · Sections A–F";
   buildTreeUI();
+  updateDailyStreak();
   refreshFooterStats();
   refreshSetupScreen();
   showScreen("setup");
