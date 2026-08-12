@@ -369,8 +369,8 @@
     letter-spacing: 0.05em; color: var(--ink-faint); margin: 0 0 10px;
   }
   .heat-grid {
-    display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 1fr); grid-auto-columns: 1fr;
-    gap: 3px; width: 100%; height: 88px;
+    display: grid; grid-template-columns: repeat(10, 1fr);
+    gap: 5px; width: 100%; height: 40px;
   }
   .heat-cell { border-radius: 3px; background: var(--surface-2); }
   .heat-legend { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--ink-faint); margin-top: 8px; }
@@ -466,7 +466,7 @@
       <button class="secondary-btn" id="resumeBtn" type="button" style="display:none;">Resume session (<span id="resumeCount">0</span> left)</button>
       <button class="primary-btn" id="startBtn" type="button">Shuffle &amp; start</button>
       <div class="activity-heatmap">
-        <h3>Study activity — last 12 weeks</h3>
+        <h3>Study activity — last 10 days</h3>
         <div id="heatmapGrid" class="heat-grid"></div>
         <div class="heat-legend">
           <span>Less</span>
@@ -1132,11 +1132,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   }
 
   function renderHeatmap() {
-    const days = dailyLogSeries(84); // 12 weeks
-    // Pad the front so columns always start on a Sunday, like GitHub's heatmap,
-    // instead of a ragged first week.
-    const firstDow = new Date(days[0].date + "T00:00:00").getDay();
-    const padded = new Array(firstDow).fill(null).concat(days);
+    const days = dailyLogSeries(10); // single-row strip, not a multi-week calendar grid
 
     const grid = document.getElementById("heatmapGrid");
     const tooltip = document.getElementById("heatTooltip");
@@ -1150,10 +1146,9 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
       if (f < 0.75) return "var(--heat-3)";
       return "var(--accent)";
     }
-    padded.forEach(day => {
+    days.forEach(day => {
       const cell = document.createElement("div");
       cell.className = "heat-cell";
-      if (!day) { cell.style.visibility = "hidden"; grid.appendChild(cell); return; }
       cell.style.background = colorFor(day.seen);
       cell.addEventListener("pointermove", e => {
         const label = new Date(day.date + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
