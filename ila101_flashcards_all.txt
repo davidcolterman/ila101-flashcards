@@ -2751,7 +2751,7 @@ A: Balance Sheet: Assets = Liabilities + Equity
 A: SFAC No. 8 (”CON8 Ch4”) defines balance sheet elements:
    • Asset = present right of entity to economic benefit
      ◦ Restricts others’ access to asset
-     ◦ Provisions for losses required if probable future benefit Ó
+     ◦ Provisions for losses required if probable future benefit ↓
      ◦ Includes tangible (e.g. financial instruments) and intangible (e.g. goodwill)
    • Liability = present obligation of entity to transfer economic benefit
      ◦ ASC 450 requires liabilities for contingent events that are probable and reasonably
@@ -4117,11 +4117,11 @@ A: • Low marginal cost (reinsurer’s lower expenses or different assumptions)
 
 [384] Q: How does reinsurance relate to divestiture, M&A, and admin optimization?
 A: • Divesting product line: Exit lines/areas, reallocate capital, simplify admin,
-   overhead Ó
+   overhead ↓
    • M&A: Transfer blocks or sell/purchase companies
      ◦ Assumption typically used for permanent sales; indemnity sometimes preferred
    • Admin optimization:
-     ◦ Cede business →admin burden Ó
+     ◦ Cede business →admin burden ↓
      ◦ Assume business →use excess admin capacity
 
 [385] Q: How does reinsurance benefit reinsurers?
@@ -5076,7 +5076,7 @@ A: Annual ROE_{t} = AfterTaxStockEarn_{t} / EquityBase_{t}
 
 [463] Q: List considerations for selecting profit goals.
 A: 1. Select accounting basis:
-     ◦ Usually solvency (Statutory) ñ distributable earnings
+     ◦ Usually solvency (Statutory) ⇒ distributable earnings
      ◦ May also use stockholder basis (GAAP)
    2. Determine how to reflect risk:
      ◦ Formula-based: Function of risk (mortality, expense, investment)
@@ -5480,7 +5480,7 @@ A: “Expense charges” refers to QAB charges and guideline prem exp
 
 [498] Q: List 4 computational rules under 7702.
 A: 1. Assumed DBs cannot increase
-     ◦ Option 1 NAR should ó through maturity
+     ◦ Option 1 NAR should ⇓ through maturity
    2. Deemed maturity must be age 95–100
      ◦ Even if actual maturity age < 95
      ◦ Even if ending mortality table age > 100
@@ -5601,18 +5601,18 @@ E.3.6 — CIT Ch. 10: Taxation of Canadian Life Insurance Policies  (E.3 Policyh
 
 [509] Q: Describe primary classifications of life insurance for tax purposes in Canada.
 A: Post-Dec 1, 1982 Policies
-   1. Exempt policies ñ insurance-oriented (most favorable)
+   1. Exempt policies ⇒ insurance-oriented (most favorable)
      ◦ Inside CSV build-up is only taxed on disposition
      ◦ DBs are 100% tax-free
      ◦ Must pass exempt test (different rules for pre-2017 vs. post-2016)
      ◦ Burden is on insurer to maintain exempt status
-   2. Non-exempt policies ñ savings-oriented (least favorable)
+   2. Non-exempt policies ⇒ savings-oriented (least favorable)
      ◦ CSV build-up is taxed annually (“accrual taxation”)
      ◦ Untaxed CSV build-up is taxed at death
      ◦ Includes deferred annuities
    Grandfathered Pre-Dec 2, 1982 Policies (most favorable tax status of all)
    • No exempt/non-exempt distinction and higher cost basis
-   • If lose grandfathered status ñ deemed disposition ñ perform exempt testing
+   • If lose grandfathered status ⇒ deemed disposition ⇒ perform exempt testing
 
 [510] Q: Describe Canadian exempt policy rules.
 A: "Existing" rules for pre-2017 issues, and "new" rules for post-2016 issue
@@ -6591,7 +6591,7 @@ A: • LTCI products may collect premiums decades before claims begin
    • Pricing relies heavily on assumed reinvestment returns
      ◦ Premiums must accumulate sufficient reserves
    • Insurers in the 1990s assumed high reinvestment rates (7%)
-   • Unhedged insurers took large losses when rates Ó in the early 2000s
+   • Unhedged insurers took large losses when rates ↓ in the early 2000s
    • Erroneously assumed rates would mean revert higher
    Lesson: Active management of options/rights protects against drops in future
    investment yield, increasing certainty of meeting obligations
