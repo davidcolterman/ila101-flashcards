@@ -1074,7 +1074,7 @@ A: • Attorneys’ fees paid as annuity:
 A: • Canadian structured settlements also tax-free
      ◦ Canadian tax authority = Canada Revenue Agency (CRA)
    • Notable differences with US market:
-     ◦ 50% of structured settlements involve qualified assignments („100% in US)
+     ◦ 50% of structured settlements involve qualified assignments (≈100% in US)
      ◦ Market much smaller (2–3 insurers dominate)
      ◦ No factoring since structured settlement payments are non-transferrable
 
@@ -2095,7 +2095,7 @@ A: • Selective lapses – have same mortality as newly selected lives (qrx+ts)
 A: • Most insurers assumed <100% lapse rate at end of level period
    • Assumed shock lapse↑as level period↑
      ◦ 100% more common for 20-30-yr term than 10- and 15-yr
-     ◦ Median shock lapse: „80% for 10-yr to „95% for 30-yr
+     ◦ Median shock lapse: ≈80% for 10-yr to ≈95% for 30-yr
    • Median PL mortality = 230%–300% of level period
    • Mortality deterioration assumptions generally grade down over 3 years
    • Assumed lapses and mortality deterioration had strong correlation
