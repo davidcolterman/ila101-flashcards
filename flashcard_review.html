@@ -672,7 +672,8 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   // Bump this string by hand whenever flashcard_review.html is edited and deployed, so the
   // sidebar can show "did my update actually land" without needing a build step or git access
   // from the page itself. Not derived from git -- this is a plain literal to update per deploy.
-  const APP_VERSION = "Updated Aug 15, 2026";
+  // Include a time (not just date) so multiple same-day deploys are distinguishable.
+  const APP_VERSION = "Updated Aug 15, 2026 · 12:27 AM";
 
   // ---------- persistence ----------
   function loadState() {
