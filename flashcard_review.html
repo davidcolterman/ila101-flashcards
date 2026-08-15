@@ -397,7 +397,15 @@
   .session-size-label {
     display: flex; justify-content: space-between; font-size: 12.5px; color: var(--ink-muted);
   }
-  .session-size-label b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .session-size-label b {
+    color: var(--ink); font-variant-numeric: tabular-nums; cursor: pointer;
+    border-bottom: 1px dashed var(--ink-muted);
+  }
+  .session-size-label #sessionSizeInput {
+    width: 3.2em; font: inherit; font-variant-numeric: tabular-nums; color: var(--ink);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+    padding: 0 3px; box-sizing: border-box;
+  }
   .session-size input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
   .session-size input[type="range"]:disabled { cursor: default; opacity: 0.5; }
   .why-card {
@@ -504,7 +512,6 @@
     <div id="tree" role="tree" aria-label="Filter by section, reading, and chapter"></div>
     <div id="treeSearchEmpty" style="display:none;">No matching cards</div>
     <div class="sidebar-footer">
-      <div class="stat-line"><span>Study streak</span><span class="n" id="statStreak">0 days</span></div>
       <div class="stat-line"><span>Cards reviewed (all time)</span><span class="n" id="statSeen">0</span></div>
       <div class="spark-row" id="sparkRow" style="display:none;">
         <span>30-day accuracy</span>
@@ -544,8 +551,8 @@
       </div>
       <div class="session-size" id="sessionSizeRow">
         <div class="session-size-label">
-          <span>Session size</span>
-          <span><b id="sessionSizeLabel">0</b> of <span id="sessionSizeMax">0</span></span>
+          <span>Deck size</span>
+          <span><b id="sessionSizeLabel" tabindex="0" role="button" aria-label="Click to type a deck size">0</b><input type="number" id="sessionSizeInput" min="1" step="1" style="display:none;"> of <span id="sessionSizeMax">0</span></span>
         </div>
         <input type="range" id="sessionSizeSlider" min="1" max="1" value="1" step="1">
       </div>
@@ -673,7 +680,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   // sidebar can show "did my update actually land" without needing a build step or git access
   // from the page itself. Not derived from git -- this is a plain literal to update per deploy.
   // Include a time (not just date) so multiple same-day deploys are distinguishable.
-  const APP_VERSION = "Updated Aug 15, 2026 · 12:37 AM";
+  const APP_VERSION = "Updated Aug 15, 2026 · 3:44 PM";
 
   // ---------- persistence ----------
   function loadState() {
@@ -681,7 +688,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) return JSON.parse(raw);
     } catch (e) {}
-    return { stats: {}, selected: null, dailyStreak: null, syncBaseline: {}, dailyLog: {} };
+    return { stats: {}, selected: null, syncBaseline: {}, dailyLog: {}, dailyLogBaseline: {} };
   }
   // If a saved leaf selection shares no overlap with the deck's current leaves
   // (e.g. section/reading/chapter labels were retagged), treat it as stale
@@ -701,27 +708,27 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     // ensure every leaf present (first run, or recovering from stale selection)
     DECK.forEach(c => selectedLeaves.add(c.leaf));
   }
-  // Daily streak: local-only (like `selected`, deliberately not part of cloud
-  // sync — see schedulePush(), which only pushes `stats`), since "opened the
-  // app today" is inherently a per-device fact.
-  let dailyStreak = persisted.dailyStreak || { count: 0, lastActiveDate: null };
   // Per-card {seen,got,missed} snapshot as of this device's last successful sync
   // merge — see mergeSync(). Lets a push contribute only what changed locally
   // since then (a delta), rather than overwriting the server's cumulative counts.
   let syncBaseline = persisted.syncBaseline || {};
   // Per-day {seen, got} activity log, keyed by local calendar date (YYYY-MM-DD) —
-  // local-only like dailyStreak/selected, drives the sidebar sparkline and the
-  // setup-screen activity heatmap. Unbounded growth is fine: ~1 entry/day, a few
-  // exam-prep months is a trivial amount of JSON.
+  // drives the sidebar sparkline and the setup-screen activity strip. Synced
+  // across devices via mergeSync() (see dailyLogBaseline below), same delta
+  // pattern as `stats`. Unbounded growth is fine: ~1 entry/day, a few exam-prep
+  // months is a trivial amount of JSON.
   let dailyLog = persisted.dailyLog || {};
+  // Per-day snapshot of dailyLog as of this device's last successful sync —
+  // the dailyLog analog of syncBaseline above.
+  let dailyLogBaseline = persisted.dailyLogBaseline || {};
 
   function persist() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       stats,
       selected: Array.from(selectedLeaves),
-      dailyStreak,
       syncBaseline,
-      dailyLog
+      dailyLog,
+      dailyLogBaseline
     }));
     schedulePush();
   }
@@ -729,23 +736,6 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   function localDateStr(d) {
     d = d || new Date();
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
-  }
-
-  // Called once per page load. Counts consecutive CALENDAR days (local time)
-  // the app has been opened on: same day as last visit -> no change, exactly
-  // one day later -> streak+1, any bigger gap (or first-ever visit) -> reset to 1.
-  function updateDailyStreak() {
-    const today = localDateStr();
-    if (dailyStreak.lastActiveDate === today) return;
-    if (dailyStreak.lastActiveDate) {
-      const last = new Date(dailyStreak.lastActiveDate + "T00:00:00");
-      const diffDays = Math.round((new Date(today + "T00:00:00") - last) / (24 * 60 * 60 * 1000));
-      dailyStreak.count = diffDays === 1 ? dailyStreak.count + 1 : 1;
-    } else {
-      dailyStreak.count = 1;
-    }
-    dailyStreak.lastActiveDate = today;
-    persist();
   }
 
   // Migration for stats saved before streak/lastCorrectAt existed: derive a
@@ -1156,8 +1146,6 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     let seen = 0;
     Object.values(stats).forEach(s => { seen += s.seen; });
     document.getElementById("statSeen").textContent = seen;
-    document.getElementById("statStreak").textContent =
-      dailyStreak.count + (dailyStreak.count === 1 ? " day" : " days");
     refreshAccuracyUI();
     renderSparkline();
   }
@@ -1445,6 +1433,56 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     document.getElementById("sessionSizeLabel").textContent = sessionSize;
   });
 
+  // Lets the "N of total" number be typed directly instead of only dragged.
+  // The <b> label and the <input> swap visibility rather than one replacing
+  // the other in the DOM, so no listeners need re-attaching on each toggle.
+  const sessionSizeLabelEl = document.getElementById("sessionSizeLabel");
+  const sessionSizeInputEl = document.getElementById("sessionSizeInput");
+
+  function openSessionSizeInput() {
+    if (document.getElementById("sessionSizeSlider").disabled) return;
+    const total = filteredDeck().length;
+    sessionSizeInputEl.max = Math.max(total, 1);
+    sessionSizeInputEl.value = sessionSize;
+    sessionSizeLabelEl.style.display = "none";
+    sessionSizeInputEl.style.display = "";
+    sessionSizeInputEl.focus();
+    sessionSizeInputEl.select();
+  }
+
+  function commitSessionSizeInput() {
+    const total = filteredDeck().length;
+    let val = parseInt(sessionSizeInputEl.value, 10);
+    if (!Number.isFinite(val)) val = sessionSize;
+    val = Math.max(1, Math.min(Math.max(total, 1), val));
+    sessionSize = val;
+    sessionSizeTouched = true;
+    sessionSizeLabelEl.textContent = sessionSize;
+    document.getElementById("sessionSizeSlider").value = sessionSize;
+    sessionSizeInputEl.style.display = "none";
+    sessionSizeLabelEl.style.display = "";
+  }
+
+  function cancelSessionSizeInput() {
+    // Hiding a focused element still fires its blur event asynchronously in
+    // Chrome, which would otherwise trigger commitSessionSizeInput() with
+    // whatever was typed. Resetting the value back to the current sessionSize
+    // first makes that inevitable blur-driven commit a no-op.
+    sessionSizeInputEl.value = sessionSize;
+    sessionSizeInputEl.style.display = "none";
+    sessionSizeLabelEl.style.display = "";
+  }
+
+  sessionSizeLabelEl.addEventListener("click", openSessionSizeInput);
+  sessionSizeLabelEl.addEventListener("keydown", e => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openSessionSizeInput(); }
+  });
+  sessionSizeInputEl.addEventListener("blur", commitSessionSizeInput);
+  sessionSizeInputEl.addEventListener("keydown", e => {
+    if (e.key === "Enter") sessionSizeInputEl.blur();
+    if (e.key === "Escape") cancelSessionSizeInput();
+  });
+
   document.getElementById("modeToggle").addEventListener("click", e => {
     const btn = e.target.closest("button[data-mode]");
     if (!btn || btn.disabled) return;
@@ -1704,7 +1742,6 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
       exportedAt: new Date().toISOString(),
       stats,
       selected: Array.from(selectedLeaves),
-      dailyStreak,
       dailyLog
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -1753,15 +1790,16 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
         // true on the server too instead of leaving it to a delta-merge to reconcile.
         syncBaseline = JSON.parse(JSON.stringify(stats));
         selectedLeaves = new Set(sanitizeSelected(data.selected) || DECK.map(c => c.leaf));
-        if (data.dailyStreak) dailyStreak = data.dailyStreak;
         if (data.dailyLog) dailyLog = data.dailyLog;
+        // Same reasoning as syncBaseline above, applied to dailyLog's own baseline.
+        dailyLogBaseline = JSON.parse(JSON.stringify(dailyLog));
         persist();
         refreshTreeUI();
         refreshFooterStats();
         refreshSetupScreen();
         if (syncReady && syncDocRef) {
           clearTimeout(syncPushTimer);
-          syncDocRef.set({ stats, updatedAt: Date.now() }).catch(() => {});
+          syncDocRef.set({ stats, dailyLog, updatedAt: Date.now() }).catch(() => {});
         }
         showImportStatus("Imported progress for " + Object.keys(data.stats).length + " cards.", false);
       } catch (e) {
@@ -1811,30 +1849,35 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   // persist -> schedulePush -> mergeSync -> ends up back here).
   function persistLocalOnly() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      stats, selected: Array.from(selectedLeaves), dailyStreak, syncBaseline, dailyLog
+      stats, selected: Array.from(selectedLeaves), syncBaseline, dailyLog, dailyLogBaseline
     }));
   }
 
-  // Merges this device's local stats into the server's, via a transaction so it's
-  // always reconciled against FRESH server state, not a stale load-time snapshot.
-  // Cumulative counters (seen/got/missed) are combined by adding only what changed
-  // locally since this device's last successful sync (syncBaseline), not by
-  // overwriting the server's totals wholesale — otherwise two devices reviewing
-  // the same card between syncs would silently lose one side's counts instead of
-  // both being reflected. Point-in-time fields (lastResult/last/streak/
-  // lastCorrectAt) come from whichever side was touched more recently, which is
-  // the one thing the old logic already got right. Runs both on connect and on
-  // every debounced push after a local review.
+  // Merges this device's local stats AND dailyLog into the server's, via a
+  // transaction so it's always reconciled against FRESH server state, not a
+  // stale load-time snapshot. Cumulative counters (seen/got/missed, and
+  // dailyLog's per-day seen/got) are combined by adding only what changed
+  // locally since this device's last successful sync (syncBaseline /
+  // dailyLogBaseline), not by overwriting the server's totals wholesale —
+  // otherwise two devices reviewing on the same day between syncs would
+  // silently lose one side's counts instead of both being reflected. Point-in-
+  // time stats fields (lastResult/last/streak/lastCorrectAt) come from
+  // whichever side was touched more recently, which is the one thing the old
+  // logic already got right. Runs both on connect and on every debounced push
+  // after a local review.
   async function mergeSync() {
     // Frozen snapshots so a Firestore-transaction retry (on write contention) always
     // recomputes the same delta against the same starting point, rather than treating
     // its own prior attempt's output as if it were the original local state.
     const localSnapshot = JSON.parse(JSON.stringify(stats));
     const baselineSnapshot = JSON.parse(JSON.stringify(syncBaseline));
-    let merged;
+    const localLogSnapshot = JSON.parse(JSON.stringify(dailyLog));
+    const logBaselineSnapshot = JSON.parse(JSON.stringify(dailyLogBaseline));
+    let merged, mergedLog;
     await firebase.firestore().runTransaction(async tx => {
       const snap = await tx.get(syncDocRef);
       const remote = (snap.exists && snap.data().stats) || {};
+      const remoteLog = (snap.exists && snap.data().dailyLog) || {};
       merged = {};
       new Set([...Object.keys(remote), ...Object.keys(localSnapshot)]).forEach(id => {
         const r = remote[id], l = localSnapshot[id], b = baselineSnapshot[id];
@@ -1855,7 +1898,15 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
           streak: newer.streak || 0, lastCorrectAt: newer.lastCorrectAt || 0
         };
       });
-      tx.set(syncDocRef, { stats: merged, updatedAt: Date.now() }, { merge: true });
+      mergedLog = {};
+      new Set([...Object.keys(remoteLog), ...Object.keys(localLogSnapshot)]).forEach(date => {
+        const r = remoteLog[date], l = localLogSnapshot[date], b = logBaselineSnapshot[date];
+        const delta = (l && b)
+          ? { seen: Math.max(0, l.seen - b.seen), got: Math.max(0, l.got - b.got) }
+          : (l ? { seen: l.seen, got: l.got } : { seen: 0, got: 0 });
+        mergedLog[date] = { seen: (r ? r.seen : 0) + delta.seen, got: (r ? r.got : 0) + delta.got };
+      });
+      tx.set(syncDocRef, { stats: merged, dailyLog: mergedLog, updatedAt: Date.now() }, { merge: true });
     });
     // Only overwrite stats[id] with the merged result if the live value still matches
     // what was snapshotted going into the transaction. If it doesn't, a mark() landed
@@ -1868,7 +1919,13 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
       const stillFresh = JSON.stringify(stats[id] || null) === JSON.stringify(localSnapshot[id] || null);
       if (stillFresh) stats[id] = merged[id];
     });
+    // Same stillFresh guard as stats above, applied per calendar day.
+    Object.keys(mergedLog).forEach(date => {
+      const stillFresh = JSON.stringify(dailyLog[date] || null) === JSON.stringify(localLogSnapshot[date] || null);
+      if (stillFresh) dailyLog[date] = mergedLog[date];
+    });
     syncBaseline = JSON.parse(JSON.stringify(merged));
+    dailyLogBaseline = JSON.parse(JSON.stringify(mergedLog));
     persistLocalOnly();
     refreshTreeUI();
     refreshFooterStats();
@@ -1915,7 +1972,6 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   document.getElementById("deckMeta").textContent = DECK.length + " cards · Sections A–F";
   document.getElementById("appVersion").textContent = APP_VERSION;
   buildTreeUI();
-  updateDailyStreak();
   refreshFooterStats();
   refreshSetupScreen();
   showScreen("setup");
