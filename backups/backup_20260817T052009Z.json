@@ -1,0 +1,50 @@
+{
+ "takenAt": "2026-08-17T05:20:08.948113Z",
+ "accounts": [
+  {
+   "account": "account_1",
+   "docId": "a6b54c20a7b96eeac1a911e6da3124a560fe6dc042ebf270e3676e7095b95652",
+   "exists": true,
+   "totalSeen": 0,
+   "totalGot": 0,
+   "totalMissed": 0,
+   "cardCount": 0,
+   "dailyLog": {
+    "2026-08-14": {
+     "got": 0,
+     "seen": 0
+    },
+    "2026-08-12": {
+     "got": 0,
+     "seen": 0
+    },
+    "2026-08-17": {
+     "seen": 0,
+     "got": 0
+    },
+    "2026-08-16": {
+     "got": 0,
+     "seen": 0
+    },
+    "2026-08-15": {
+     "got": 0,
+     "seen": 0
+    },
+    "2026-08-13": {
+     "seen": 0,
+     "got": 0
+    }
+   }
+  },
+  {
+   "account": "account_2",
+   "docId": "6f047f64612700b2a0e585ad4a2ac019f23844c7e6a33104eedf9ab8705fc760",
+   "exists": true,
+   "totalSeen": 0,
+   "totalGot": 0,
+   "totalMissed": 0,
+   "cardCount": 0,
+   "dailyLog": {}
+  }
+ ]
+}

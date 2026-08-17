@@ -701,6 +701,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   "use strict";
 
   const STORAGE_KEY = "ila101_flashcards_v1";
+  const SYNC_CODE_KEY = "ila101_sync_code";
   const SECTION_ORDER = [
     "A. Product Design",
     "B. Experience Studies and Assumptions",
@@ -724,7 +725,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   // sidebar can show "did my update actually land" without needing a build step or git access
   // from the page itself. Not derived from git -- this is a plain literal to update per deploy.
   // Include a time (not just date) so multiple same-day deploys are distinguishable.
-  const APP_VERSION = "Updated Aug 16, 2026 · 10:02 PM";
+  const APP_VERSION = "Updated Aug 17, 2026 · 1:19 AM";
 
   // ---------- persistence ----------
   function loadState() {
@@ -732,7 +733,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) return JSON.parse(raw);
     } catch (e) {}
-    return { stats: {}, selected: null, syncBaseline: {}, dailyLog: {}, dailyLogBaseline: {} };
+    return { stats: {}, selected: null, baselinesByCode: {}, unattributedBaseline: null, dailyLog: {}, pendingOverwrite: null, stateEpoch: 0 };
   }
   // If a saved leaf selection shares no overlap with the deck's current leaves
   // (e.g. section/reading/chapter labels were retagged), treat it as stale
@@ -752,27 +753,113 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     // ensure every leaf present (first run, or recovering from stale selection)
     DECK.forEach(c => selectedLeaves.add(c.leaf));
   }
-  // Per-card {seen,got,missed} snapshot as of this device's last successful sync
-  // merge — see mergeSync(). Lets a push contribute only what changed locally
-  // since then (a delta), rather than overwriting the server's cumulative counts.
-  let syncBaseline = persisted.syncBaseline || {};
   // Per-day {seen, got} activity log, keyed by local calendar date (YYYY-MM-DD) —
   // drives the sidebar sparkline and the setup-screen activity strip. Synced
   // across devices via mergeSync() (see dailyLogBaseline below), same delta
   // pattern as `stats`. Unbounded growth is fine: ~1 entry/day, a few exam-prep
   // months is a trivial amount of JSON.
   let dailyLog = persisted.dailyLog || {};
-  // Per-day snapshot of dailyLog as of this device's last successful sync —
-  // the dailyLog analog of syncBaseline above.
-  let dailyLogBaseline = persisted.dailyLogBaseline || {};
+  // Baselines are tracked PER ACCOUNT (keyed by the connected doc's id, i.e.
+  // sha256(syncCode)) rather than as a single shared value. This is what makes
+  // switching between two codes on the same device correct in both directions:
+  // connecting a code this device has never used starts that account's baseline
+  // at {} (so the device's current local history uploads to it fresh, as
+  // intended), while switching BACK to a code already used resumes exactly that
+  // account's own baseline instead of re-treating all local history as new and
+  // double-counting on top of what that account's cloud doc already has. A
+  // single shared baseline that gets destructively cleared on switch was tried
+  // and reverted (2026-08-17) -- it couldn't be made safe against an
+  // already-armed push timer, an in-flight mergeSync(), or a second tab still
+  // pointed at the account being left, all of which read/write the SAME
+  // variable regardless of which account is "current."
+  let baselinesByCode = persisted.baselinesByCode || {};
+  // The currently-connected account's baseline, mirrored out of
+  // baselinesByCode[activeDocId] by initSync() when it connects (or resumed
+  // from there by the storage listener when another tab updates the map) --
+  // never written to directly outside of initSync()/saveActiveBaseline().
+  let syncBaseline = {}, dailyLogBaseline = {}, activeDocId = null;
+  // A baseline that exists but has no connected account to file it under yet.
+  // Two sources, tagged via `source` because they mean fundamentally different
+  // things to whichever account eventually claims them:
+  // - "legacy": a one-time migration from before per-account baselines existed,
+  //   when the old format tracked a single flat syncBaseline for whatever code
+  //   happened to be connected -- that code IS knowable (it's whatever
+  //   SYNC_CODE_KEY held at load time, not "whichever code connects first").
+  //   This genuinely IS a baseline: it reflects what that account's server
+  //   already had as of the last successful sync under the old code.
+  // - "local": a Reset/Import run before any sync code was ever connected (see
+  //   saveActiveBaseline() below). This is NOT a baseline in the same sense --
+  //   nothing has ever been delivered to ANY server -- so it must be applied
+  //   as an authoritative overwrite (via pendingOverwrite) when a code finally
+  //   connects, not treated as "the server already has this, only upload the
+  //   delta." Claiming it as a plain baseline would silently zero out whatever
+  //   that account's doc doesn't already happen to match (a real regression
+  //   caught in review, 2026-08-17).
+  // Persisted (not just held in memory) so it isn't lost to a reload before the
+  // matching account is ever connected, and consumed at most once so a later
+  // DIFFERENT code can't wrongly claim it.
+  let unattributedBaseline = persisted.unattributedBaseline || null;
+  if (!unattributedBaseline) {
+    const legacyOwnerCode = localStorage.getItem(SYNC_CODE_KEY) || "";
+    const hasLegacy = (persisted.syncBaseline && Object.keys(persisted.syncBaseline).length)
+      || (persisted.dailyLogBaseline && Object.keys(persisted.dailyLogBaseline).length);
+    if (hasLegacy) {
+      unattributedBaseline = {
+        ownerCode: legacyOwnerCode,
+        source: "legacy",
+        syncBaseline: persisted.syncBaseline || {},
+        dailyLogBaseline: persisted.dailyLogBaseline || {}
+      };
+    }
+  }
+  // Set by Reset/Import when they need to fully overwrite the remote doc (not a
+  // delta-merge) but that overwrite hasn't been confirmed to land yet (e.g. the
+  // device was offline). queueSync() retries this ahead of any normal merge until
+  // it succeeds -- otherwise a normal delta-merge against a baseline that already
+  // matches local computes delta=0 and lets the server's still-stale data flow
+  // back in, silently reverting the reset/import. See mergeSync()/queueSync().
+  let pendingOverwrite = persisted.pendingOverwrite || null;
+  // Bumped by Reset/Import so any mergeSync() already in flight (started against a
+  // now-superseded local snapshot) can detect it happened and bail out instead of
+  // writing stale pre-reset/pre-import data back over the fresh state. See
+  // mergeSync()'s epoch check. Persisted (not just in-memory) so the SAME reset/
+  // import also supersedes an in-flight mergeSync() running in a DIFFERENT tab of
+  // this device -- the storage listener below only ever raises a tab's stateEpoch
+  // to the max of what it sees, never lowers it, so a stale tab can't un-supersede
+  // itself by writing its own smaller epoch back.
+  let stateEpoch = persisted.stateEpoch || 0;
+
+  // Writes the active account's current syncBaseline/dailyLogBaseline into
+  // baselinesByCode[activeDocId] so it's what gets resumed next time this
+  // device connects to this same account. Call after any change to
+  // syncBaseline/dailyLogBaseline, before persisting. If no account is
+  // currently connected (activeDocId null -- e.g. Reset/Import run before sync
+  // was ever enabled), parks it as unattributedBaseline instead of silently
+  // dropping it: without this, the moment initSync() next runs for whatever
+  // code eventually connects, it would find nothing to resume and start that
+  // baseline at {} -- re-uploading this local history as if brand new on top
+  // of whatever that account's cloud doc already has.
+  function saveActiveBaseline() {
+    const snapshot = {
+      syncBaseline: JSON.parse(JSON.stringify(syncBaseline)),
+      dailyLogBaseline: JSON.parse(JSON.stringify(dailyLogBaseline))
+    };
+    if (activeDocId) {
+      baselinesByCode[activeDocId] = snapshot;
+    } else {
+      unattributedBaseline = { ownerCode: syncCode, source: "local", ...snapshot };
+    }
+  }
 
   function persist() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       stats,
       selected: Array.from(selectedLeaves),
-      syncBaseline,
+      baselinesByCode,
+      unattributedBaseline,
       dailyLog,
-      dailyLogBaseline
+      pendingOverwrite,
+      stateEpoch
     }));
     schedulePush();
   }
@@ -1406,21 +1493,39 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   // A real confirm() rather than a self-reverting "click again" label: the old
   // pattern had no countdown shown and was one accidental double-tap away from
   // silently wiping all 605 cards' history, especially on mobile.
-  document.getElementById("resetProgressBtn").addEventListener("click", () => {
+  document.getElementById("resetProgressBtn").addEventListener("click", async () => {
     if (!confirm("Reset all progress? This erases every card's seen/got/missed history and the study-activity log on this device (and in cloud sync, if enabled). This can't be undone.")) return;
+    // Supersede any mergeSync() already in flight -- see its epoch check -- so a
+    // stale merge computed from before this reset can't write pre-reset data back
+    // into stats/syncBaseline (or the server) after we've cleared them below.
+    stateEpoch++;
     Object.keys(stats).forEach(k => delete stats[k]);
     syncBaseline = {};
     dailyLog = {};
+    dailyLogBaseline = {}; // was left stale here before -- zeroed the day's real activity log on the next sync
+    saveActiveBaseline();
+    // A regular sync push merges deltas against whatever's still on the server,
+    // which would just pull the "erased" progress right back in — a reset needs
+    // an explicit full overwrite of the remote copy instead. Recorded as
+    // pendingOverwrite (persisted) so it's retried on the next sync if this
+    // device is offline right now, rather than silently never happening. Tagged
+    // with docPath and only set when actually connected to an account -- with no
+    // account, there's nothing to push to; and if the user later connects a
+    // DIFFERENT account, queueSync() must never mistake this reset for that
+    // account's own authoritative overwrite and wipe its cloud data.
+    pendingOverwrite = (syncReady && syncDocRef) ? { docPath: syncDocRef.path, stats: {}, dailyLog: {} } : null;
     persist();
     refreshFooterStats();
     refreshSetupScreen();
-    // A regular sync push merges deltas against whatever's still on the server,
-    // which would just pull the "erased" progress right back in — a reset needs
-    // an explicit full overwrite of the remote copy instead. Cancel persist()'s
-    // debounced push first so it can't race this overwrite and land after it.
     if (syncReady && syncDocRef) {
       clearTimeout(syncPushTimer);
-      syncDocRef.set({ stats: {}, updatedAt: Date.now() }).catch(() => {});
+      try {
+        await syncDocRef.set({ stats: {}, dailyLog: {}, updatedAt: Date.now() });
+        pendingOverwrite = null;
+        persistLocalOnly();
+      } catch (e) {
+        setSyncStatus("Reset saved locally, will finish syncing once back online", true);
+      }
     }
   });
 
@@ -1900,10 +2005,15 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     const file = importFile.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
         const data = JSON.parse(reader.result);
         if (!data || typeof data.stats !== "object") throw new Error("Not a recognized progress file");
+        // Supersede any mergeSync() already in flight -- see its epoch check -- so
+        // a stale merge computed from before this import can't write pre-import
+        // data back into stats/syncBaseline (or the server) after we've replaced
+        // them below.
+        stateEpoch++;
         Object.keys(stats).forEach(k => delete stats[k]);
         Object.assign(stats, data.stats);
         // Baseline = the freshly-imported stats exactly, not left stale or cleared to
@@ -1917,13 +2027,29 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
         if (data.dailyLog) dailyLog = data.dailyLog;
         // Same reasoning as syncBaseline above, applied to dailyLog's own baseline.
         dailyLogBaseline = JSON.parse(JSON.stringify(dailyLog));
+        saveActiveBaseline();
+        // Recorded as pendingOverwrite (persisted) so the remote overwrite below is
+        // retried on the next sync if this device is offline right now, rather
+        // than silently never happening -- see queueSync(). Tagged with docPath
+        // and only set when actually connected; see the matching comment in the
+        // Reset handler for why (a later switch to a DIFFERENT account must never
+        // inherit this as if it were that account's own overwrite).
+        pendingOverwrite = (syncReady && syncDocRef)
+          ? { docPath: syncDocRef.path, stats: JSON.parse(JSON.stringify(stats)), dailyLog: JSON.parse(JSON.stringify(dailyLog)) }
+          : null;
         persist();
         refreshTreeUI();
         refreshFooterStats();
         refreshSetupScreen();
         if (syncReady && syncDocRef) {
           clearTimeout(syncPushTimer);
-          syncDocRef.set({ stats, dailyLog, updatedAt: Date.now() }).catch(() => {});
+          try {
+            await syncDocRef.set({ stats: pendingOverwrite.stats, dailyLog: pendingOverwrite.dailyLog, updatedAt: Date.now() });
+            pendingOverwrite = null;
+            persistLocalOnly();
+          } catch (e) {
+            setSyncStatus("Import saved locally, will finish syncing once back online", true);
+          }
         }
         showImportStatus("Imported progress for " + Object.keys(data.stats).length + " cards.", false);
       } catch (e) {
@@ -1942,7 +2068,6 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   }
 
   // ---------- cloud sync ----------
-  const SYNC_CODE_KEY = "ila101_sync_code";
   let syncCode = localStorage.getItem(SYNC_CODE_KEY) || "";
   let syncDocRef = null, syncReady = false, syncPushTimer = null;
 
@@ -1980,6 +2105,22 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     if (syncInFlight) { syncQueued = true; return; }
     syncInFlight = true;
     try {
+      if (pendingOverwrite && syncDocRef) {
+        if (pendingOverwrite.docPath === syncDocRef.path) {
+          // A Reset/Import's authoritative overwrite didn't confirm yet (offline
+          // at the time). It must land before any normal delta-merge runs: a
+          // merge would see local already matching syncBaseline (delta=0) and
+          // pull the server's still-stale pre-reset/pre-import data straight
+          // back in.
+          await syncDocRef.set({ stats: pendingOverwrite.stats, dailyLog: pendingOverwrite.dailyLog, updatedAt: Date.now() });
+        }
+        // Else: this pendingOverwrite belongs to a previously-connected account
+        // (the user switched sync codes before it ever landed) -- never apply
+        // one account's pending overwrite to a different account's doc. Either
+        // way it's now resolved (applied, or correctly discarded).
+        pendingOverwrite = null;
+        persistLocalOnly();
+      }
       await mergeSync();
     } catch (e) {
       setSyncStatus("Cloud sync offline (will retry)", true);
@@ -1993,7 +2134,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   // persist -> schedulePush -> mergeSync -> ends up back here).
   function persistLocalOnly() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      stats, selected: Array.from(selectedLeaves), syncBaseline, dailyLog, dailyLogBaseline
+      stats, selected: Array.from(selectedLeaves), baselinesByCode, unattributedBaseline, dailyLog, pendingOverwrite, stateEpoch
     }));
   }
 
@@ -2010,6 +2151,15 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   // logic already got right. Runs both on connect and on every debounced push
   // after a local review.
   async function mergeSync() {
+    // Captured once at call-start: if the connected account changes (syncDocRef)
+    // or a Reset/Import supersedes local state (stateEpoch) while this call is
+    // still in flight, `ref`/`epoch` let it detect that and bail rather than
+    // writing this now-stale attempt's results over the newer state. Always use
+    // `ref`, never the live `syncDocRef`, for both tx.get/tx.set below -- otherwise
+    // a mid-flight account switch could write this account's data into whichever
+    // doc syncDocRef happens to point to by the time the transaction runs.
+    const ref = syncDocRef;
+    const epoch = stateEpoch;
     // Frozen snapshots so a Firestore-transaction retry (on write contention) always
     // recomputes the same delta against the same starting point, rather than treating
     // its own prior attempt's output as if it were the original local state.
@@ -2017,9 +2167,11 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     const baselineSnapshot = JSON.parse(JSON.stringify(syncBaseline));
     const localLogSnapshot = JSON.parse(JSON.stringify(dailyLog));
     const logBaselineSnapshot = JSON.parse(JSON.stringify(dailyLogBaseline));
-    let merged, mergedLog;
+    let merged, mergedLog, aborted = false;
     await firebase.firestore().runTransaction(async tx => {
-      const snap = await tx.get(syncDocRef);
+      if (stateEpoch !== epoch) { aborted = true; return; }
+      const snap = await tx.get(ref);
+      if (stateEpoch !== epoch) { aborted = true; return; }
       const remote = (snap.exists && snap.data().stats) || {};
       const remoteLog = (snap.exists && snap.data().dailyLog) || {};
       merged = {};
@@ -2057,26 +2209,108 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
           : (l ? { seen: l.seen, got: l.got } : { seen: 0, got: 0 });
         mergedLog[date] = { seen: (r ? r.seen : 0) + delta.seen, got: (r ? r.got : 0) + delta.got };
       });
-      tx.set(syncDocRef, { stats: merged, dailyLog: mergedLog, updatedAt: Date.now() }, { merge: true });
+      tx.set(ref, { stats: merged, dailyLog: mergedLog, updatedAt: Date.now() }, { merge: true });
     });
-    // Only overwrite stats[id] with the merged result if the live value still matches
-    // what was snapshotted going into the transaction. If it doesn't, a mark() landed
-    // on this card while the (network-round-trip-bound) transaction was in flight —
-    // overwriting it here would silently drop that review, since merged[id] was computed
-    // from the stale pre-transaction snapshot and knows nothing about it. Leaving it
-    // alone is safe: syncBaseline still advances to `merged` below, so that concurrent
-    // edit is correctly captured as a delta on the *next* sync instead of being lost.
+    if (aborted || stateEpoch !== epoch) {
+      // A Reset/Import superseded this sync while it was in flight. Its own
+      // authoritative write (via pendingOverwrite) is the correct final word --
+      // don't touch local stats/baseline/dailyLog at all, and since `aborted`
+      // means the transaction's tx.set() never ran, there's nothing on the
+      // server to account for either.
+      return;
+    }
+    // .path, not `!==` on the reference itself: initSync() constructs a NEW
+    // DocumentReference object every time it runs (the Firestore SDK doesn't
+    // cache/dedupe these), so a same-account reconnect mid-flight -- e.g. an
+    // 'online' event or the periodic retry firing while a previous merge is
+    // still awaiting its transaction, very plausible with the spotty
+    // connectivity of actual travel -- would otherwise be misread as an
+    // account switch every time, permanently double-counting via the branch
+    // below (it writes localSnapshot as the new baseline while the in-memory
+    // syncBaseline stays at the old value, so the very next sync recomputes
+    // and re-uploads the same delta on top of what was just written).
+    if (!syncDocRef || syncDocRef.path !== ref.path) {
+      // The connected account changed mid-flight (sync-code switch), but unlike
+      // the epoch case above, the transaction DID commit above -- ref's doc
+      // really did just receive this delta. Don't apply `merged` to local
+      // stats/activeDocId (that would misattribute it to whichever account is
+      // now connected -- the round-1 cross-contamination bug), but DO record
+      // what was actually uploaded as ref's own new baseline, keyed by ref.id
+      // (not activeDocId, which by now points at the newly-connected account).
+      // Skipping this would leave ref's baseline stale, so the next time this
+      // device reconnects to ref, delta would be recomputed against the OLD
+      // baseline and re-upload the exact slice ref's server already has --
+      // a permanent double-count on the account just switched away from.
+      baselinesByCode[ref.id] = {
+        syncBaseline: localSnapshot,
+        dailyLogBaseline: localLogSnapshot
+      };
+      persistLocalOnly();
+      return;
+    }
+    // Overwrite stats[id] with the merged result if the live value still matches
+    // what was snapshotted going into the transaction. If it doesn't, a mark() or
+    // toggleFavorite() landed on this card while the (network-round-trip-bound)
+    // transaction was in flight. merged[id] was computed from the stale
+    // pre-transaction snapshot and knows nothing about that extra increment --
+    // carry it forward on top of merged's server-informed totals rather than
+    // discarding it. (Previously this branch left stats[id] untouched entirely,
+    // which looked safe but wasn't: syncBaseline still advanced to `merged` below,
+    // and a later sync's delta is Math.max(0, live - baseline) -- since `merged`
+    // can be *larger* than `live` whenever the server had contributions from
+    // another device, that floor silently ate the concurrent edit instead of
+    // catching it on "the next sync" as the old comment here claimed.)
     Object.keys(merged).forEach(id => {
-      const stillFresh = JSON.stringify(stats[id] || null) === JSON.stringify(localSnapshot[id] || null);
-      if (stillFresh) stats[id] = merged[id];
+      const live = stats[id];
+      const snap = localSnapshot[id] || null;
+      const stillFresh = JSON.stringify(live || null) === JSON.stringify(snap);
+      if (stillFresh) {
+        stats[id] = merged[id];
+        return;
+      }
+      const l = live || { seen: 0, got: 0, missed: 0 };
+      const s = snap || { seen: 0, got: 0, missed: 0 };
+      // The concurrent touch might have been toggleFavorite(), not mark() -- that
+      // doesn't advance `last`, so trusting local's point-in-time fields
+      // unconditionally would let a bare favourite-toggle on this device wipe out
+      // a more-recent grading (lastResult/streak/lastCorrectAt) that `merged[id]`
+      // already correctly picked up from another device. Only take local's value
+      // when it's actually newer than what merged already decided, same
+      // ">=" convention `newer` uses above.
+      const localGradeIsNewer = (l.last || 0) >= (merged[id].last || 0);
+      const localFavIsNewer = (l.favoritedAt || 0) >= (merged[id].favoritedAt || 0);
+      stats[id] = {
+        ...merged[id],
+        seen: merged[id].seen + Math.max(0, l.seen - s.seen),
+        got: merged[id].got + Math.max(0, l.got - s.got),
+        missed: merged[id].missed + Math.max(0, l.missed - s.missed),
+        lastResult: localGradeIsNewer ? l.lastResult : merged[id].lastResult,
+        last: localGradeIsNewer ? l.last : merged[id].last,
+        streak: localGradeIsNewer ? (l.streak || 0) : merged[id].streak,
+        lastCorrectAt: localGradeIsNewer ? (l.lastCorrectAt || 0) : merged[id].lastCorrectAt,
+        favorite: localFavIsNewer ? !!l.favorite : merged[id].favorite,
+        favoritedAt: Math.max(l.favoritedAt || 0, merged[id].favoritedAt || 0)
+      };
     });
-    // Same stillFresh guard as stats above, applied per calendar day.
+    // Same stillFresh guard + carry-forward as stats above, applied per calendar day.
     Object.keys(mergedLog).forEach(date => {
-      const stillFresh = JSON.stringify(dailyLog[date] || null) === JSON.stringify(localLogSnapshot[date] || null);
-      if (stillFresh) dailyLog[date] = mergedLog[date];
+      const live = dailyLog[date];
+      const snap = localLogSnapshot[date] || null;
+      const stillFresh = JSON.stringify(live || null) === JSON.stringify(snap);
+      if (stillFresh) {
+        dailyLog[date] = mergedLog[date];
+        return;
+      }
+      const l = live || { seen: 0, got: 0 };
+      const s = snap || { seen: 0, got: 0 };
+      dailyLog[date] = {
+        seen: mergedLog[date].seen + Math.max(0, l.seen - s.seen),
+        got: mergedLog[date].got + Math.max(0, l.got - s.got)
+      };
     });
     syncBaseline = JSON.parse(JSON.stringify(merged));
     dailyLogBaseline = JSON.parse(JSON.stringify(mergedLog));
+    saveActiveBaseline();
     persistLocalOnly();
     refreshTreeUI();
     refreshFooterStats();
@@ -2089,19 +2323,96 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     setSyncStatus("Synced " + new Date().toLocaleTimeString());
   }
 
+  let initInFlight = false, initPending = false;
   async function initSync() {
-    renderSyncUI();
-    if (!syncCode) return;
-    setSyncStatus("Connecting…");
+    // If a call is already in flight (e.g. this device is mid-connect when the
+    // user switches sync codes), don't just no-op: a stale in-flight call could
+    // finish AFTER syncCode has changed and set syncReady=true / syncDocRef
+    // against whichever code it originally captured, silently syncing to the
+    // wrong account with no UI indication. Instead mark a fresh run pending and
+    // loop, so the in-flight call's own finish re-reads the LATEST syncCode
+    // rather than a stale request being dropped.
+    if (initInFlight) { initPending = true; return; }
+    initInFlight = true;
     try {
-      await firebase.auth().signInAnonymously();
-      const docId = await sha256Hex(syncCode);
-      syncDocRef = firebase.firestore().collection("syncs").doc(docId);
-      syncReady = true;
-      await queueSync();
-      setSyncStatus("Cloud sync on");
-    } catch (e) {
-      setSyncStatus("Cloud sync offline (will retry)", true);
+      do {
+        initPending = false;
+        renderSyncUI();
+        if (!syncCode) { syncReady = false; syncDocRef = null; activeDocId = null; break; }
+        setSyncStatus("Connecting…");
+        try {
+          await firebase.auth().signInAnonymously();
+          const docId = await sha256Hex(syncCode);
+          syncDocRef = firebase.firestore().collection("syncs").doc(docId);
+          // Resume THIS account's own baseline if this device has connected to
+          // it before; otherwise start fresh ({}) so the device's current local
+          // history uploads to this (new-to-this-device) account, same as
+          // first-time setup. See baselinesByCode above.
+          let saved = baselinesByCode[docId];
+          // Only claim an unattributed baseline for a code that either has no
+          // known owner (a first-ever sync connect, or a Reset/Import done
+          // while disconnected -- there's no more specific truth to wait for)
+          // or explicitly matches THIS code -- never hand it to whichever code
+          // happens to connect first, which would misattribute a legacy
+          // migration (or an unrelated Reset/Import) meant for a different
+          // account and cause that account to lose track of its own baseline.
+          //
+          // The `!saved` requirement alone would make a "local" unattributed
+          // baseline permanently inert on any device that has already synced
+          // under this code at least once -- exactly the state a real device
+          // is in for the rest of a trip after its one sync before departure.
+          // A Reset/Import done offline (activeDocId is in-memory-only, so
+          // it's null on every load until a connect actually succeeds) would
+          // then silently fail to arm its overwrite, and the stale `saved`
+          // baseline lets the pre-reset/pre-import server state flow straight
+          // back in on reconnect -- the reset/import undone without any error.
+          // A "local" source is always strictly newer truth than a stored
+          // baseline for the SAME code (it's this device's own most recent
+          // authoritative state), so it's allowed to supersede `saved` too --
+          // but only on an exact ownerCode match, never for the ownerless case,
+          // so a disconnected Reset/Import still can't overwrite some OTHER
+          // already-used account just because that happens to be the first
+          // code connected afterward.
+          if (unattributedBaseline &&
+              (!unattributedBaseline.ownerCode || unattributedBaseline.ownerCode === syncCode) &&
+              (!saved || (unattributedBaseline.source === "local" && unattributedBaseline.ownerCode === syncCode))) {
+            saved = { syncBaseline: unattributedBaseline.syncBaseline, dailyLogBaseline: unattributedBaseline.dailyLogBaseline };
+            baselinesByCode[docId] = saved;
+            if (unattributedBaseline.source !== "legacy") {
+              // Defaults to the safe (overwrite) branch for anything other than
+              // an explicit "legacy" tag -- including "local" and any future/
+              // unrecognized shape. A "legacy" baseline genuinely reflects what
+              // a server already received (the old sync mechanism delivered it
+              // there over time), so treating it as a plain baseline is correct
+              // ONLY for that specific, explicitly-confirmed case. Everything
+              // else (a Reset/Import done while disconnected -- nothing was
+              // ever actually delivered to ANY server -- or anything whose
+              // provenance this code doesn't recognize) must be pushed as an
+              // authoritative overwrite instead: treating an unconfirmed
+              // baseline as "the server already has this, only upload the
+              // delta" would silently zero out (or pull down to) whatever this
+              // account's doc doesn't already happen to match -- a real
+              // regression caught in review before it shipped.
+              pendingOverwrite = { docPath: syncDocRef.path, stats: saved.syncBaseline, dailyLog: saved.dailyLogBaseline };
+            }
+            unattributedBaseline = null;
+          }
+          // Deep-copied rather than aliased so a future in-place edit of
+          // syncBaseline/dailyLogBaseline can never silently corrupt the map's
+          // own stored copy out from under saveActiveBaseline()'s bookkeeping.
+          syncBaseline = saved ? JSON.parse(JSON.stringify(saved.syncBaseline)) : {};
+          dailyLogBaseline = saved ? JSON.parse(JSON.stringify(saved.dailyLogBaseline)) : {};
+          activeDocId = docId;
+          persistLocalOnly();
+          syncReady = true;
+          await queueSync();
+          setSyncStatus("Cloud sync on");
+        } catch (e) {
+          setSyncStatus("Cloud sync offline (will retry)", true);
+        }
+      } while (initPending);
+    } finally {
+      initInFlight = false;
     }
   }
 
@@ -2116,19 +2427,29 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     const val = document.getElementById("syncCodeInput").value.trim();
     if (!val) return;
     // Connecting a sync code doesn't clear local stats, and mergeSync() treats any
-    // card with no matching syncBaseline entry as brand-new local progress to upload.
-    // Switching to a DIFFERENT code than this device was last connected to, while it
-    // still has real local history, would silently push that whole history onto the
-    // new code's account -- exactly how one device's progress bled into a different
-    // person's cloud doc. Only warn on an actual code change with something to lose;
-    // first-time setup (syncCode was empty) is the intended "seed this code" case.
-    const hadLocalProgress = Object.values(stats).some(s => s.seen);
-    if (syncCode && syncCode !== val && hadLocalProgress) {
+    // card with no baselinesByCode entry for the target account as brand-new
+    // local progress to upload (see baselinesByCode declaration above). Warn on
+    // ANY switch to a genuinely different code while real local history exists --
+    // deliberately not exempted just because syncCode is currently empty, since
+    // that isn't reliable proof this is a first-time setup (it could be a device
+    // whose sync code got cleared while local history remained, which is exactly
+    // how the original incident happened). A device with truly nothing local to
+    // lose still skips silently. Note: this only WARNS -- it doesn't clear or
+    // touch any baseline itself. Per-account baselines (above) already make
+    // switching correct in both directions without a destructive clear here, so
+    // this handler no longer needs to (and must not) mutate sync state to make
+    // the warning "true" -- an earlier attempt at that (2026-08-17) raced an
+    // already-armed push timer / in-flight merge / a second tab still on the old
+    // account, corrupting whichever account was involved.
+    const hadLocalProgress = Object.values(stats).some(s => s.seen || s.favorite)
+      || Object.keys(dailyLog).length > 0;
+    if (val !== syncCode && hadLocalProgress) {
       const ok = confirm(
         "This device has existing review history. Connecting a different sync code " +
-        "will upload all of it to that code's cloud data -- if this device was previously " +
-        "used under a different code (e.g. someone else's), this will mix your progress " +
-        "into theirs. Continue only if you're sure this history belongs under \"" + val + "\"."
+        "will attach that history to this device's data under that code's account -- " +
+        "if this device was previously used under a different code (e.g. someone " +
+        "else's), this could mix your progress into theirs. Continue only if you're " +
+        "sure this history belongs under \"" + val + "\"."
       );
       if (!ok) return;
     }
@@ -2139,7 +2460,66 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     initSync();
   });
 
-  window.addEventListener("online", schedulePush);
+  window.addEventListener("online", () => {
+    // If initSync() never successfully connected (e.g. the app was opened
+    // offline), syncReady stays false forever and schedulePush() is a permanent
+    // no-op -- "Cloud sync offline (will retry)" wasn't actually true without
+    // this. Retry the full connect in that case; otherwise just flush any
+    // pending local changes normally.
+    if (syncCode && !syncReady) initSync(); else schedulePush();
+  });
+
+  // Two tabs/windows of this PWA on the same device each hold their own
+  // in-memory stats/syncBaseline/dailyLog, loaded once at startup. Without this,
+  // whichever tab writes localStorage last would silently clobber the other's
+  // unsaved local reviews, and each tab's queueSync() mutex only guards against
+  // overlap within itself -- two tabs syncing from the same stale baseline
+  // reproduce the exact overlap-double-count bug fixed above, just across tabs
+  // instead of within one. `storage` only fires in OTHER tabs, never the one that
+  // made the write, so this can't loop.
+  window.addEventListener("storage", e => {
+    if (e.key !== STORAGE_KEY || !e.newValue) return;
+    try {
+      const fresh = JSON.parse(e.newValue);
+      // A stale tab's own later write (still carrying an epoch from before some
+      // OTHER tab's reset/import) must not partially overwrite state a newer
+      // epoch already superseded -- ignore the WHOLE payload, not just
+      // stateEpoch itself, whenever it's strictly behind what this tab already
+      // knows. Equal is fine (the common case: an ordinary review in the other
+      // tab, no reset/import involved) and still gets adopted below.
+      if ((fresh.stateEpoch || 0) < stateEpoch) return;
+      stateEpoch = fresh.stateEpoch || 0;
+      Object.keys(stats).forEach(k => delete stats[k]);
+      Object.assign(stats, fresh.stats || {});
+      dailyLog = fresh.dailyLog || {};
+      baselinesByCode = fresh.baselinesByCode || {};
+      // Without this, a second tab keeps its own stale in-memory copy and can
+      // resurrect an already-consumed unattributedBaseline into localStorage on
+      // its own next persist() -- which, with an empty ownerCode, a later
+      // connect could then wrongly reclaim.
+      unattributedBaseline = fresh.unattributedBaseline || null;
+      // Re-derive THIS tab's active baseline from the (possibly just-updated)
+      // map, keyed by whichever account THIS tab is connected to -- never adopt
+      // the other tab's syncBaseline/dailyLogBaseline directly, since that tab
+      // could be connected to a DIFFERENT account than this one (two tabs are
+      // free to sync to two different codes; only the underlying per-account
+      // data, not "which account is active," is shared here).
+      if (activeDocId && baselinesByCode[activeDocId]) {
+        syncBaseline = JSON.parse(JSON.stringify(baselinesByCode[activeDocId].syncBaseline));
+        dailyLogBaseline = JSON.parse(JSON.stringify(baselinesByCode[activeDocId].dailyLogBaseline));
+      }
+      pendingOverwrite = fresh.pendingOverwrite || null;
+      const freshSelected = sanitizeSelected(fresh.selected);
+      if (freshSelected) selectedLeaves = new Set(freshSelected);
+      refreshTreeUI();
+      refreshFooterStats();
+      refreshSetupScreen();
+      // Lighter touch than a full renderCard() -- avoids disrupting this tab's
+      // own in-progress flip state mid-review, same reasoning as mergeSync()'s
+      // own post-sync star-icon refresh.
+      if (sessionActive && order[pos]) renderStarBtn(order[pos].id);
+    } catch (e2) {}
+  });
 
   // ---------- init ----------
   document.getElementById("deckMeta").textContent = DECK.length + " cards · Sections A–F";
@@ -2152,6 +2532,12 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   setInterval(() => {
     refreshFooterStats();
     if (document.getElementById("setupScreen").style.display !== "none") refreshSetupScreen();
+    // If initSync() failed for a reason other than "offline" (auth error,
+    // Firestore momentarily unreachable, a blocked request) the "online" listener
+    // never fires to trigger a retry, and syncReady stays false with the status
+    // text still claiming a retry is coming. Bounded periodic check closes that
+    // gap without an open-ended retry loop.
+    if (syncCode && !syncReady && !initInFlight) initSync();
   }, 30000);
 })();
 </script>
