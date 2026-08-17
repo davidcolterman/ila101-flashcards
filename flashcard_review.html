@@ -724,7 +724,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   // sidebar can show "did my update actually land" without needing a build step or git access
   // from the page itself. Not derived from git -- this is a plain literal to update per deploy.
   // Include a time (not just date) so multiple same-day deploys are distinguishable.
-  const APP_VERSION = "Updated Aug 15, 2026 · 9:07 PM";
+  const APP_VERSION = "Updated Aug 16, 2026 · 10:02 PM";
 
   // ---------- persistence ----------
   function loadState() {
@@ -1964,9 +1964,29 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   function schedulePush() {
     if (!syncReady || !syncDocRef) return;
     clearTimeout(syncPushTimer);
-    syncPushTimer = setTimeout(() => {
-      mergeSync().catch(() => setSyncStatus("Cloud sync offline (will retry)", true));
-    }, 2000);
+    syncPushTimer = setTimeout(queueSync, 2000);
+  }
+
+  // mergeSync() snapshots local stats/baseline at call-start and only advances the
+  // real baseline after its network round-trip resolves. Without this guard, a second
+  // mergeSync() starting while an earlier one is still in flight would snapshot the
+  // SAME stale baseline, and both calls would independently add their own copy of the
+  // overlapping delta to the server -- double-counting whatever was reviewed during
+  // the overlap. queueSync() ensures at most one mergeSync() runs at a time; any
+  // pushes requested while one is in flight are coalesced into a single follow-up
+  // run (against the freshly-advanced baseline) rather than firing their own.
+  let syncInFlight = false, syncQueued = false;
+  async function queueSync() {
+    if (syncInFlight) { syncQueued = true; return; }
+    syncInFlight = true;
+    try {
+      await mergeSync();
+    } catch (e) {
+      setSyncStatus("Cloud sync offline (will retry)", true);
+    } finally {
+      syncInFlight = false;
+      if (syncQueued) { syncQueued = false; queueSync(); }
+    }
   }
 
   // Writes to localStorage without going through persist() (which would recurse:
@@ -2078,7 +2098,7 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
       const docId = await sha256Hex(syncCode);
       syncDocRef = firebase.firestore().collection("syncs").doc(docId);
       syncReady = true;
-      await mergeSync();
+      await queueSync();
       setSyncStatus("Cloud sync on");
     } catch (e) {
       setSyncStatus("Cloud sync offline (will retry)", true);
