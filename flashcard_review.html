@@ -2115,6 +2115,23 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   document.getElementById("syncConnectBtn").addEventListener("click", () => {
     const val = document.getElementById("syncCodeInput").value.trim();
     if (!val) return;
+    // Connecting a sync code doesn't clear local stats, and mergeSync() treats any
+    // card with no matching syncBaseline entry as brand-new local progress to upload.
+    // Switching to a DIFFERENT code than this device was last connected to, while it
+    // still has real local history, would silently push that whole history onto the
+    // new code's account -- exactly how one device's progress bled into a different
+    // person's cloud doc. Only warn on an actual code change with something to lose;
+    // first-time setup (syncCode was empty) is the intended "seed this code" case.
+    const hadLocalProgress = Object.values(stats).some(s => s.seen);
+    if (syncCode && syncCode !== val && hadLocalProgress) {
+      const ok = confirm(
+        "This device has existing review history. Connecting a different sync code " +
+        "will upload all of it to that code's cloud data -- if this device was previously " +
+        "used under a different code (e.g. someone else's), this will mix your progress " +
+        "into theirs. Continue only if you're sure this history belongs under \"" + val + "\"."
+      );
+      if (!ok) return;
+    }
     syncCode = val;
     localStorage.setItem(SYNC_CODE_KEY, syncCode);
     document.getElementById("syncForm").style.display = "none";
