@@ -1,6 +1,7 @@
 const CACHE = "ila101-flashcards-v1";
 const ASSETS = ["./flashcard_review.html", "./manifest.json", "./icon-192.png", "./icon-512.png",
-  "./img/b2-1-persister-mortality-by-method.png", "./img/d1-spv-trust-types.png"];
+  "./img/b2-1-persister-mortality-by-method.png", "./img/d1-spv-trust-types.png",
+  "./img/c2-double-entry-debit-credit.png"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));

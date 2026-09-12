@@ -1,0 +1,133 @@
+{
+ "takenAt": "2026-09-12T16:16:42.471529Z",
+ "accounts": [
+  {
+   "account": "account_1",
+   "docId": "a6b54c20a7b96eeac1a911e6da3124a560fe6dc042ebf270e3676e7095b95652",
+   "exists": true,
+   "totalSeen": 529,
+   "totalGot": 415,
+   "totalMissed": 114,
+   "cardCount": 216,
+   "dailyLog": {
+    "2026-08-17": {
+     "seen": 121,
+     "got": 97
+    },
+    "2026-09-06": {
+     "seen": 17,
+     "got": 12
+    },
+    "2026-08-18": {
+     "got": 66,
+     "seen": 84
+    },
+    "2026-08-31": {
+     "got": 12,
+     "seen": 13
+    },
+    "2026-09-01": {
+     "seen": 19,
+     "got": 13
+    },
+    "2026-08-12": {
+     "got": 0,
+     "seen": 0
+    },
+    "2026-08-30": {
+     "got": 12,
+     "seen": 15
+    },
+    "2026-08-14": {
+     "got": 0,
+     "seen": 0
+    },
+    "2026-08-29": {
+     "got": 16,
+     "seen": 20
+    },
+    "2026-09-07": {
+     "seen": 23,
+     "got": 20
+    },
+    "2026-08-21": {
+     "got": 56,
+     "seen": 74
+    },
+    "2026-08-25": {
+     "got": 7,
+     "seen": 8
+    },
+    "2026-09-08": {
+     "got": 13,
+     "seen": 20
+    },
+    "2026-08-16": {
+     "got": 0,
+     "seen": 0
+    },
+    "2026-08-15": {
+     "got": 0,
+     "seen": 0
+    },
+    "2026-08-23": {
+     "got": 21,
+     "seen": 27
+    },
+    "2026-09-05": {
+     "got": 33,
+     "seen": 40
+    },
+    "2026-08-20": {
+     "got": 12,
+     "seen": 14
+    },
+    "2026-08-13": {
+     "got": 0,
+     "seen": 0
+    },
+    "2026-09-04": {
+     "got": 5,
+     "seen": 7
+    },
+    "2026-08-22": {
+     "seen": 27,
+     "got": 20
+    }
+   }
+  },
+  {
+   "account": "account_2",
+   "docId": "07d046d5fac12b3f82daf5035b9aae86db5adc8275ebfbf05ec83005a4a8ba3e",
+   "exists": true,
+   "totalSeen": 886,
+   "totalGot": 600,
+   "totalMissed": 286,
+   "cardCount": 163,
+   "dailyLog": {}
+  },
+  {
+   "account": "account_3",
+   "docId": "6f047f64612700b2a0e585ad4a2ac019f23844c7e6a33104eedf9ab8705fc760",
+   "exists": true,
+   "totalSeen": 91,
+   "totalGot": 39,
+   "totalMissed": 52,
+   "cardCount": 46,
+   "dailyLog": {
+    "2026-08-24": {
+     "got": 0,
+     "seen": 1
+    },
+    "2026-08-20": {
+     "seen": 3,
+     "got": 0
+    },
+    "2026-08-19": {
+     "seen": 1,
+     "got": 0
+    }
+   }
+  }
+ ]
+}
