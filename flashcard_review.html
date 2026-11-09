@@ -942,7 +942,16 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     recencyCorrectHalfLifeDays: 4,   // days for the "since last correct" component to reach ~50%
     recencyAttemptHalfLifeDays: 1.5, // days for the "since last attempt" component to reach ~50%
     recencyNewCardDefault: 0.5,      // recency score for a never-attempted card (neutral, not "overdue")
-    minSelectionWeight: 0.02         // floor so even a near-zero-priority card keeps some chance of being picked
+    minSelectionWeight: 0.02,        // (legacy, unused by bucketed selection)
+    examDate: "2026-11-16",          // smartQuotas(): switch to quotasFinal within finalDays of this date
+    finalDays: 2,
+    quotas: { weak: 0.30, rusty: 0.30, new: 0.20, fresh: 0.20 },
+    quotasFinal: { weak: 0.30, rusty: 0.40, new: 0.10, fresh: 0.20 },
+    weakAccBelow: 0.5,               // classifySmartCard(): smoothed accuracy under this = weak
+    rustyMinGot: 3, rustyMinAcc: 0.7, rustyMinDays: 7,
+    noCorrectDays: 30,               // days-since-correct assumed when a card has attempts but no lastCorrectAt
+    staleDaysScale: 14,              // days since correct at which staleness reaches 1
+    weightExponent: 2, weightFloor: 0.01
   };
 
   // Confidence tracks the CURRENT CONSECUTIVE STREAK, not lifetime accuracy, so
@@ -1045,32 +1054,64 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
   // card?" transparency panel in renderCard() — not persisted, not used for scoring.
   let smartShuffleInfo = {};
 
-  // Weighted random selection WITHOUT replacement, via the Efraimidis-Spirakis
-  // "A-Res" method: give every card a key = U^(1/weight) for a fresh uniform
-  // random U, then take the top-N cards by key. This is equivalent to
-  // repeatedly drawing weighted-without-replacement and renormalizing, but
-  // computes in one pass — higher-weight cards skew toward higher keys (so
-  // they're more likely to rank in the top N), but every card has a nonzero
-  // weight (see minSelectionWeight) and therefore always has *some* chance,
-  // which is the point: this deliberately does NOT just sort by score and
-  // take the top N, so the same weak cards don't dominate every session.
+  // Selection is BUCKETED, not one blended average (the old average was near-flat,
+  // and streak-based "confidence" ignored time, so a card with a long OLD streak
+  // looked safe forever). Buckets use only got/missed + lastCorrectAt, which every
+  // legacy card has -- legacy streaks are clamped to -1/0/1 so streak can't detect
+  // "proven but stale". First match wins:
+  //   new:   never attempted
+  //   weak:  last result a miss (streak<0) or smoothed accuracy < weakAccBelow
+  //   rusty: proven (>=rustyMinGot correct, >=rustyMinAcc accuracy) but no correct answer in >=rustyMinDays
+  //   fresh: everything else
+  // Each bucket gets a session quota; a short bucket's slots spill to others.
+  // Inside a bucket, cards are drawn by Efraimidis-Spirakis weighted sampling
+  // (key = U^(1/w)) with w = max(weakness, staleness, uncertainty)^2 -- max, not
+  // average, so one extreme dimension is enough to make a card a priority.
+  function classifySmartCard(stat, now) {
+    const C = SMART_SHUFFLE_CONFIG;
+    const att = stat ? stat.got + stat.missed : 0;
+    const d = stat && stat.lastCorrectAt ? Math.max(0, now - stat.lastCorrectAt) / 864e5 : C.noCorrectDays;
+    let bucket = "fresh";
+    if (att === 0) bucket = "new";
+    else if ((stat.streak || 0) < 0 || smoothedAccuracy(stat) < C.weakAccBelow) bucket = "weak";
+    else if (stat.got >= C.rustyMinGot && stat.got / att >= C.rustyMinAcc && d >= C.rustyMinDays) bucket = "rusty";
+    return { bucket, daysSinceCorrect: d };
+  }
+
+  function smartQuotas(now) {
+    const C = SMART_SHUFFLE_CONFIG;
+    const daysLeft = Math.ceil((new Date(C.examDate + "T00:00:00").getTime() - now) / 864e5);
+    return daysLeft <= C.finalDays ? C.quotasFinal : C.quotas;
+  }
+
   function selectSmartShuffleCards(cards, numberToSelect) {
+    const C = SMART_SHUFFLE_CONFIG;
     const now = Date.now();
     const n = Math.min(numberToSelect, cards.length);
-    const keyed = cards.map(c => {
-      const stat = statFor(c.id); // null is fine — every calculate*() treats a missing stat as "new card"
-      const info = calculateSmartShuffleScore(stat, now);
-      const weight = Math.max(SMART_SHUFFLE_CONFIG.minSelectionWeight, info.score);
-      const key = Math.pow(Math.random(), 1 / weight);
-      return { card: c, key, info, confidence: calculateConfidence(stat) };
+    const groups = { weak: [], rusty: [], new: [], fresh: [] };
+    cards.forEach(c => {
+      const stat = statFor(c.id); // null is fine -- a missing stat is a "new" card
+      const { bucket, daysSinceCorrect } = classifySmartCard(stat, now);
+      const sig = calculateSmartShuffleScore(stat, now);
+      const stale = Math.min(1, daysSinceCorrect / C.staleDaysScale);
+      const w = Math.pow(Math.max(sig.weakness, stale, sig.uncertainty), C.weightExponent) + C.weightFloor;
+      groups[bucket].push({ card: c, key: Math.pow(Math.random(), 1 / w), bucket, sig, daysSinceCorrect, confidence: calculateConfidence(stat) });
     });
-    keyed.sort((a, b) => b.key - a.key);
-    const chosen = keyed.slice(0, n);
+    Object.values(groups).forEach(g => g.sort((a, b) => b.key - a.key));
+    const quotas = smartQuotas(now);
+    const chosen = [];
+    ["weak", "rusty", "new", "fresh"].forEach(b => {
+      chosen.push(...groups[b].splice(0, Math.round(n * quotas[b])));
+    });
+    ["weak", "rusty", "fresh", "new"].forEach(b => {
+      if (chosen.length < n) chosen.push(...groups[b].splice(0, n - chosen.length));
+    });
+    const picked = shuffle(chosen.slice(0, n));
     smartShuffleInfo = {};
-    chosen.forEach(({ card, info, confidence }) => {
-      smartShuffleInfo[card.id] = { weakness: info.weakness, recency: info.recency, uncertainty: info.uncertainty, confidence };
+    picked.forEach(({ card, bucket, sig, daysSinceCorrect, confidence }) => {
+      smartShuffleInfo[card.id] = { bucket, daysSinceCorrect, weakness: sig.weakness, recency: sig.recency, uncertainty: sig.uncertainty, confidence };
     });
-    return chosen.map(x => x.card);
+    return picked.map(x => x.card);
   }
 
   // ---------- build tree ----------
@@ -1881,13 +1922,19 @@ const DECK = [{"q":"List coverage periods and face amount patterns for term.","a
     const s = statFor(card.id);
     const attempts = s ? s.got + s.missed : 0;
     const correct = s ? s.got : 0;
+    const reason = {
+      weak: "Missed lately or low accuracy",
+      rusty: "Proven before, but last correct " + daysAgoLabel(s ? s.lastCorrectAt : 0),
+      new: "Not seen yet",
+      fresh: "Recently reinforced"
+    }[info.bucket];
+    const chip = { weak: "Weak", rusty: "Rusty", new: "New", fresh: "Fresh" }[info.bucket];
     document.getElementById("whyCardBody").textContent =
+      chip + " \u2014 " + reason + "\n\n" +
       "Weakness: " + bucketLabel(info.weakness) + "\n" +
-      "Recency: " + bucketLabel(info.recency) + "\n" +
       "Uncertainty: " + bucketLabel(info.uncertainty) + "\n\n" +
       "Attempts: " + attempts + "\n" +
       "Correct: " + correct + "\n" +
-      "Current confidence: " + Math.round(info.confidence * 100) + "%\n" +
       "Last correct: " + daysAgoLabel(s ? s.lastCorrectAt : 0) + "\n" +
       "Last attempted: " + daysAgoLabel(s ? s.last : 0);
   }
